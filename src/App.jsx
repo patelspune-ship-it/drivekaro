@@ -2239,6 +2239,20 @@ function AdminFleet() {
 
   async function handleDeleteCar(id, name) {
     if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
+
+    // Block if car has live bookings
+    const { data: live } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('car_id', id)
+      .in('status', ['active', 'upcoming', 'enquiry'])
+      .limit(1);
+
+    if (live && live.length > 0) {
+      alert(`Cannot delete ${name} — it has active or upcoming bookings. Complete or cancel those first.`);
+      return;
+    }
+
     const { error } = await supabase.from('cars').delete().eq('id', id);
     if (error) alert("Error: " + error.message);
     else loadCars();
