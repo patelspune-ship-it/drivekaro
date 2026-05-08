@@ -158,6 +158,7 @@ function StatusDot({ status }) {
     active: { color: "bg-emerald-400", text: "Active", ring: "shadow-[0_0_8px_rgba(74,222,128,0.5)]" },
     completed: { color: "bg-[#9e8e7e]", text: "Completed", ring: "" },
     upcoming: { color: "bg-blue-400", text: "Upcoming", ring: "" },
+    enquiry: { color: "bg-amber-400", text: "Pending confirmation", ring: "" },
   };
   const c = config[status] || config.available;
   return (
@@ -1498,7 +1499,7 @@ function CustomerDashboard({ setView, setSelectedCar, customerProfile, customerS
     if (!customerProfile?.id) { setLoading(false); return; }
     supabase
       .from('bookings')
-      .select('id, booking_code, from_date, to_date, days, total, status, cars(brand, model, plate_number, image_url)')
+      .select('id, booking_code, from_date, to_date, days, total, actual_amount_paid, status, cars(brand, model, plate_number, image_url)')
       .eq('customer_id', customerProfile.id)
       .order('created_at', { ascending: false })
       .then(({ data }) => { setBookings(data || []); setLoading(false); });
@@ -1545,7 +1546,7 @@ function CustomerDashboard({ setView, setSelectedCar, customerProfile, customerS
         </div>
         <div className="border border-[#d6c8b2] rounded-xl p-5">
           <div className="text-xs uppercase tracking-wider text-[#7a6858]">Lifetime spend</div>
-          <div className="text-3xl font-serif text-[#1a120c] mt-2">{formatINR(bookings.reduce((s, b) => s + (b.total || 0), 0))}</div>
+          <div className="text-3xl font-serif text-[#1a120c] mt-2">{formatINR(bookings.filter(b => b.status === 'completed').reduce((s, b) => s + (b.actual_amount_paid || b.total || 0), 0))}</div>
         </div>
         <div className="border border-[#d6c8b2] rounded-xl p-5 col-span-2 lg:col-span-1">
           <div className="text-xs uppercase tracking-wider text-[#7a6858]">Member tier</div>
@@ -1808,18 +1809,22 @@ function AdminOverview() {
       const allBookings = bookingsRes.data || [];
       const allCars = carsRes.data || [];
 
-      // Calculate metrics
-      const totalRevenue = allBookings.reduce((sum, b) => sum + (b.total || 0), 0);
-      const activeTrips = allBookings.filter(b => b.status === 'active').length;
+      // Revenue = only completed trips with actual payment collected
+      const completed = allBookings.filter(b => b.status === 'completed');
+      const active = allBookings.filter(b => b.status === 'active');
+
+      const totalRevenue = completed.reduce((sum, b) => sum + (b.actual_amount_paid || b.total || 0), 0);
+      const activeTrips = active.length;
       const availableCars = allCars.filter(c => c.status === 'available').length;
       const rentedCars = allCars.filter(c => c.status === 'rented').length;
       const utilization = allCars.length > 0 ? Math.round((rentedCars / allCars.length) * 100) : 0;
 
-      // This month's revenue
       const thisMonth = new Date().toISOString().slice(0, 7);
-      const monthRevenue = allBookings
+      const monthRevenue = completed
         .filter(b => b.created_at?.startsWith(thisMonth))
-        .reduce((sum, b) => sum + (b.total || 0), 0);
+        .reduce((sum, b) => sum + (b.actual_amount_paid || b.total || 0), 0);
+
+      const confirmedCount = allBookings.filter(b => !['enquiry'].includes(b.status)).length;
 
       setStats({
         totalRevenue,
@@ -1827,7 +1832,7 @@ function AdminOverview() {
         totalCars: allCars.length,
         availableCars,
         monthRevenue,
-        totalBookings: allBookings.length,
+        totalBookings: confirmedCount,
         utilization
       });
       setRecentBookings(allBookings.slice(0, 5));
@@ -2429,17 +2434,21 @@ function AdminBookings() {
   const [showOffline, setShowOffline] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [confirmingId, setConfirmingId] = useState(null);
   const [cars, setCars] = useState([]);
   const [offlineForm, setOfflineForm] = useState({ car_id: "", customer_name: "", customer_phone: "", from_date: "", to_date: "", status: "upcoming" });
   const [offlineError, setOfflineError] = useState("");
   const [offlineSaving, setOfflineSaving] = useState(false);
+  const [endingTrip, setEndingTrip] = useState(null); // booking object
+  const [actualPayment, setActualPayment] = useState("");
+  const [tripLoading, setTripLoading] = useState(false);
 
   async function loadBookings() {
     setLoading(true);
     const { data, error } = await supabase
       .from('bookings')
       .select(`
-        id, booking_code, from_date, to_date, days, subtotal, total, status, source, payment_status, customer_id,
+        id, booking_code, from_date, to_date, days, subtotal, total, actual_amount_paid, status, source, payment_status, customer_id,
         customers ( full_name, phone ),
         cars ( brand, model, plate_number )
       `)
@@ -2454,15 +2463,12 @@ function AdminBookings() {
   }
 
   async function confirmEnquiry(b) {
-    if (!window.confirm(`Confirm booking for ${b.customers?.full_name} · ${b.cars?.model} · ${b.from_date} → ${b.to_date}?`)) return;
-
     const { error: updateErr } = await supabase
       .from('bookings')
       .update({ status: 'upcoming' })
       .eq('id', b.id);
-    if (updateErr) { alert("Error confirming: " + updateErr.message); return; }
+    if (updateErr) { setConfirmingId(null); return; }
 
-    // Generate invoice (enquiry bookings skip this step so we do it on confirm)
     const subtotal = b.subtotal || 0;
     const cgst = Math.round(subtotal * 0.09);
     const sgst = Math.round(subtotal * 0.09);
@@ -2478,6 +2484,29 @@ function AdminBookings() {
       status: 'pending',
     });
 
+    setConfirmingId(null);
+    loadBookings();
+  }
+
+  async function startTrip(b) {
+    setTripLoading(true);
+    await supabase.from('bookings').update({ status: 'active' }).eq('id', b.id);
+    setTripLoading(false);
+    loadBookings();
+  }
+
+  async function endTrip() {
+    const paid = parseFloat(actualPayment);
+    if (!paid || paid <= 0) return;
+    setTripLoading(true);
+    await supabase.from('bookings').update({
+      status: 'completed',
+      actual_amount_paid: paid,
+      payment_status: 'paid',
+    }).eq('id', endingTrip.id);
+    setTripLoading(false);
+    setEndingTrip(null);
+    setActualPayment("");
     loadBookings();
   }
 
@@ -2652,12 +2681,26 @@ function AdminBookings() {
               <div className="col-span-2 flex items-center justify-end gap-2">
                 {b.status === 'enquiry' ? (
                   <div className="flex items-center gap-1.5">
+                    {confirmingId === b.id ? (
+                      <>
+                        <span className="text-[10px] text-[#5a4838] whitespace-nowrap">Sure?</span>
+                        <button onClick={() => confirmEnquiry(b)}
+                          className="px-3 py-1.5 bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] rounded-full text-[10px] uppercase tracking-wider font-medium transition-colors">
+                          Yes
+                        </button>
+                        <button onClick={() => setConfirmingId(null)}
+                          className="px-3 py-1.5 border border-[#bfaf9a] text-[#5a4838] rounded-full text-[10px] uppercase tracking-wider transition-colors">
+                          No
+                        </button>
+                      </>
+                    ) : (
                     <button
-                      onClick={() => confirmEnquiry(b)}
+                      onClick={() => setConfirmingId(b.id)}
                       className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] rounded-full text-[10px] uppercase tracking-wider transition-colors font-medium whitespace-nowrap"
                     >
                       <CheckCircle2 className="w-3 h-3" /> Confirm
                     </button>
+                    )}
                     {b.customers?.phone && (
                       <a
                         href={`https://wa.me/${b.customers.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hi ${b.customers.full_name?.split(' ')[0] || 'there'}! Your booking enquiry for ${b.cars?.model} (${b.from_date} → ${b.to_date}) is confirmed. Please contact us at +91 76663 98984. - DriveKaro`)}`}
@@ -2669,14 +2712,68 @@ function AdminBookings() {
                       </a>
                     )}
                   </div>
+                ) : b.status === 'upcoming' ? (
+                  <button onClick={() => startTrip(b)} disabled={tripLoading}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full text-[10px] uppercase tracking-wider font-medium transition-colors disabled:opacity-50 whitespace-nowrap">
+                    <Activity className="w-3 h-3" /> Start trip
+                  </button>
+                ) : b.status === 'active' ? (
+                  <button onClick={() => { setEndingTrip(b); setActualPayment(String(b.total || "")); }} disabled={tripLoading}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#1a120c] hover:bg-[#3d2e1e] text-[#f4e8d0] rounded-full text-[10px] uppercase tracking-wider font-medium transition-colors whitespace-nowrap">
+                    <CheckCircle2 className="w-3 h-3" /> End trip
+                  </button>
                 ) : (
-                  <StatusDot status={b.status} />
+                  <div className="flex items-center gap-2">
+                    <StatusDot status={b.status} />
+                    {b.status === 'completed' && b.actual_amount_paid && (
+                      <span className="text-[10px] text-emerald-600 font-mono font-medium">{formatINR(b.actual_amount_paid)}</span>
+                    )}
+                  </div>
                 )}
               </div>
             </motion.div>
           ))}
         </div>
       )}
+
+      {/* End Trip — payment modal */}
+      <AnimatePresence>
+        {endingTrip && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setEndingTrip(null)}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl p-8 max-w-sm w-full">
+              <h2 className="text-2xl font-serif italic text-[#1a120c] mb-1">End trip</h2>
+              <p className="text-sm text-[#7a6858] mb-6">
+                {endingTrip.customers?.full_name} · {endingTrip.cars?.model}<br />
+                {endingTrip.from_date} → {endingTrip.to_date}
+              </p>
+              <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">Amount collected from customer (₹)</label>
+              <input
+                type="number"
+                value={actualPayment}
+                onChange={e => setActualPayment(e.target.value)}
+                placeholder={`Estimate: ${endingTrip.total || 0}`}
+                className="w-full mt-2 mb-1 bg-[#f4e8d0] border border-[#d6c8b2] rounded-lg px-4 py-3 text-[#1a120c] text-xl font-mono focus:outline-none focus:border-[#c74132] transition-colors"
+                autoFocus
+              />
+              <p className="text-[10px] text-[#9e8e7e] mb-6">This is the actual cash/UPI you received — it's what counts as revenue.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setEndingTrip(null)}
+                  className="px-5 py-3 border border-[#bfaf9a] text-[#5a4838] rounded-full text-xs uppercase tracking-wider">
+                  Cancel
+                </button>
+                <button onClick={endTrip} disabled={tripLoading || !actualPayment || parseFloat(actualPayment) <= 0}
+                  className="flex-1 bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] py-3 rounded-full text-xs uppercase tracking-wider disabled:opacity-50 transition-colors font-medium">
+                  {tripLoading ? "Saving…" : "Confirm payment & close trip"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Offline booking modal */}
       <AnimatePresence>
