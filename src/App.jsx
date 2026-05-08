@@ -4,7 +4,7 @@ import {
   Car, Menu, X, ArrowRight, ArrowUpRight, Calendar, MapPin, Users, Fuel,
   Settings, Star, Plus, Search, Filter, Download, Edit3, Trash2, Eye,
   TrendingUp, IndianRupee, Activity, CheckCircle2, Clock, AlertCircle,
-  FileText, Receipt, BarChart3, LayoutGrid, Wrench, Bell, LogOut,
+  FileText, Receipt, BarChart3, LayoutGrid, Wrench, Bell, LogOut, CalendarDays,
   ChevronRight, Cog, Shield, Zap, Award, Phone, Mail, ChevronDown,
   CreditCard, Lock, Sparkles, Gauge, Sliders
 } from "lucide-react";
@@ -242,17 +242,19 @@ function Nav({ view, setView, ownerSession, customerProfile, onScrollTo, onCusto
         </nav>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setView("admin-dash")}
-            className={`hidden sm:inline-flex items-center gap-2 px-4 py-2 text-xs uppercase tracking-wider rounded-full border transition-all ${
-              view === "admin-dash"
-                ? "bg-[#c74132] border-[#c74132] text-[#1a120c]"
-                : "border-[#bfaf9a] text-[#3d2e1e] hover:border-[#c74132] hover:text-[#d4483b]"
-            }`}
-          >
-            <Shield className="w-3.5 h-3.5" />
-            {ownerSession ? "Owner Panel" : "Owner Login"}
-          </button>
+          {ownerSession && (
+            <button
+              onClick={() => setView("admin-dash")}
+              className={`hidden sm:inline-flex items-center gap-2 px-4 py-2 text-xs uppercase tracking-wider rounded-full border transition-all ${
+                view === "admin-dash"
+                  ? "bg-[#c74132] border-[#c74132] text-[#1a120c]"
+                  : "border-[#bfaf9a] text-[#3d2e1e] hover:border-[#c74132] hover:text-[#d4483b]"
+              }`}
+            >
+              <Shield className="w-3.5 h-3.5" />
+              Admin
+            </button>
+          )}
           {customerProfile ? (
             <div className="flex items-center gap-2">
               <button onClick={() => setView("customer-dash")}
@@ -761,7 +763,7 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
               <MapPin className="w-5 h-5 text-[#c74132] mb-4" />
               <div className="text-xs uppercase tracking-wider text-[#7a6858] mb-2">Find us</div>
               <div className="text-[#1a120c] text-lg font-serif italic leading-snug mb-1">
-                Kool Homes Solitaire Block-B
+                Kool Homes Solitaire
               </div>
               <div className="text-sm text-[#5a4838] leading-relaxed mb-6">
                 Kausar Baugh, Kondhwa<br />Pune, Maharashtra 411048
@@ -806,7 +808,7 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
                 <div className="flex items-center gap-2"><Mail className="w-3 h-3" /> hi@drivekaro.in</div>
                 <div className="flex items-start gap-2">
                   <MapPin className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                  <span className="leading-snug">Kool Homes Solitaire Block-B,<br />Kausar Baugh, Kondhwa,<br />Pune 411048</span>
+                  <span className="leading-snug">Kool Homes Solitaire,<br />Kausar Baugh, Kondhwa,<br />Pune 411048</span>
                 </div>
                 <a href="https://www.instagram.com/drivekaro.in" target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-2 hover:text-[#c74132] transition-colors">
@@ -827,7 +829,12 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
           </div>
           <div className="mt-16 pt-8 border-t border-[#d6c8b2] flex flex-wrap items-center justify-between gap-4 text-xs text-[#9e8e7e]">
             <div>© 2026 DriveKaro · Pune, Maharashtra</div>
-            <div className="font-mono">v1.0.0 · Built in Pune</div>
+            <button
+              onClick={() => window.__dk_admin?.()}
+              className="font-mono opacity-20 hover:opacity-60 transition-opacity cursor-default select-none"
+            >
+              v1.0.0
+            </button>
           </div>
         </div>
       </footer>
@@ -1723,6 +1730,7 @@ function AdminDashboard({ setView, onLogout, ownerEmail }) {
     { id: "overview", label: "Overview", icon: LayoutGrid },
     { id: "fleet", label: "Fleet", icon: Car },
     { id: "bookings", label: "Bookings", icon: Calendar },
+    { id: "calendar", label: "Calendar", icon: CalendarDays },
     { id: "invoices", label: "Invoices", icon: Receipt },
     { id: "customers", label: "Customers", icon: Users },
     { id: "maintenance", label: "Service", icon: Wrench },
@@ -1777,6 +1785,7 @@ function AdminDashboard({ setView, onLogout, ownerEmail }) {
             {section === "bookings" && <AdminBookings key="bk" />}
             {section === "invoices" && <AdminInvoices key="iv" />}
             {section === "customers" && <AdminCustomers key="cu" />}
+            {section === "calendar" && <AdminCalendar key="cal" />}
             {section === "maintenance" && <AdminMaintenance key="mt" />}
           </AnimatePresence>
         </div>
@@ -2448,7 +2457,7 @@ function AdminBookings() {
     const { data, error } = await supabase
       .from('bookings')
       .select(`
-        id, booking_code, from_date, to_date, days, subtotal, total, actual_amount_paid, status, source, payment_status, customer_id,
+        id, booking_code, car_id, from_date, to_date, days, subtotal, total, actual_amount_paid, status, source, payment_status, customer_id,
         customers ( full_name, phone ),
         cars ( brand, model, plate_number )
       `)
@@ -2463,11 +2472,32 @@ function AdminBookings() {
   }
 
   async function confirmEnquiry(b) {
+    // Block if another confirmed booking already covers these dates for this car
+    const { data: conflicts } = await supabase
+      .from('bookings')
+      .select('booking_code, from_date, to_date')
+      .eq('car_id', b.car_id)
+      .neq('id', b.id)
+      .not('status', 'in', '("enquiry","cancelled","completed")')
+      .lte('from_date', b.to_date)
+      .gte('to_date', b.from_date);
+
+    if (conflicts && conflicts.length > 0) {
+      const clash = conflicts[0];
+      setConfirmingId(null);
+      alert(`Cannot confirm — ${b.cars?.model} is already booked ${clash.from_date} → ${clash.to_date} (${clash.booking_code}).\n\nCancel or end that booking first, then confirm this one.`);
+      return;
+    }
+
     const { error: updateErr } = await supabase
       .from('bookings')
       .update({ status: 'upcoming' })
       .eq('id', b.id);
-    if (updateErr) { setConfirmingId(null); return; }
+    if (updateErr) {
+      setConfirmingId(null);
+      alert("Could not confirm: " + updateErr.message + "\n\nMake sure you have run the RLS policy SQL in Supabase.");
+      return;
+    }
 
     const subtotal = b.subtotal || 0;
     const cgst = Math.round(subtotal * 0.09);
@@ -2490,7 +2520,8 @@ function AdminBookings() {
 
   async function startTrip(b) {
     setTripLoading(true);
-    await supabase.from('bookings').update({ status: 'active' }).eq('id', b.id);
+    const { error } = await supabase.from('bookings').update({ status: 'active' }).eq('id', b.id);
+    if (error) alert("Could not start trip: " + error.message);
     setTripLoading(false);
     loadBookings();
   }
@@ -2499,11 +2530,12 @@ function AdminBookings() {
     const paid = parseFloat(actualPayment);
     if (!paid || paid <= 0) return;
     setTripLoading(true);
-    await supabase.from('bookings').update({
+    const { error } = await supabase.from('bookings').update({
       status: 'completed',
       actual_amount_paid: paid,
       payment_status: 'paid',
     }).eq('id', endingTrip.id);
+    if (error) { alert("Could not end trip: " + error.message); setTripLoading(false); return; }
     setTripLoading(false);
     setEndingTrip(null);
     setActualPayment("");
@@ -3001,7 +3033,7 @@ function AdminInvoices() {
                 </div>
               </div>
               <div className="mt-4 pt-4 border-t border-zinc-200 text-[10px] text-zinc-400 space-y-0.5">
-                <div>Kool Homes Solitaire Block-B, Kausar Baugh, Kondhwa, Pune 411048</div>
+                <div>Kool Homes Solitaire, Kausar Baugh, Kondhwa, Pune 411048</div>
                 <div>+91 76663 98984 · hi@drivekaro.in</div>
                 <div>GSTIN: [Update with your GSTIN] · Auto-generated · Valid without signature.</div>
               </div>
@@ -3113,6 +3145,203 @@ function AdminCustomers() {
           ))}
         </div>
       )}
+    </motion.div>
+  );
+}
+
+/* ========================== ADMIN CALENDAR ========================== */
+function AdminCalendar() {
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [cars, setCars] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null); // selected booking for detail
+
+  const today = new Date();
+  const viewDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const pad = n => String(n).padStart(2, '0');
+  const monthStart = `${year}-${pad(month + 1)}-01`;
+  const monthEnd = `${year}-${pad(month + 1)}-${pad(daysInMonth)}`;
+  const todayDay = today.getMonth() === month && today.getFullYear() === year ? today.getDate() : null;
+  const monthLabel = viewDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      supabase.from('cars').select('id, brand, model, plate_number').order('price_per_day', { ascending: false }),
+      supabase.from('bookings')
+        .select('id, booking_code, car_id, from_date, to_date, status, customers(full_name, phone)')
+        .not('status', 'eq', 'cancelled')
+        .lte('from_date', monthEnd)
+        .gte('to_date', monthStart),
+    ]).then(([c, b]) => {
+      setCars(c.data || []);
+      setBookings(b.data || []);
+      setLoading(false);
+    });
+  }, [monthOffset]);
+
+  function bookingForDay(carId, day) {
+    const date = `${year}-${pad(month + 1)}-${pad(day)}`;
+    return bookings.find(b => b.car_id === carId && date >= b.from_date && date < b.to_date);
+  }
+
+  const barColor = {
+    enquiry:   'bg-amber-400',
+    upcoming:  'bg-blue-400',
+    active:    'bg-emerald-500',
+    completed: 'bg-[#bfaf9a]',
+  };
+
+  const dayWidth = 32; // px per day cell
+
+  return (
+    <motion.div {...fadeUp}>
+      {/* Header */}
+      <div className="flex items-end justify-between flex-wrap gap-4 mb-6">
+        <div>
+          <div className="text-xs uppercase tracking-wider text-[#7a6858]">Fleet availability</div>
+          <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Calendar</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setMonthOffset(o => o - 1)}
+            className="px-4 py-2 border border-[#bfaf9a] text-[#5a4838] rounded-full text-xs uppercase tracking-wider hover:border-[#c74132]/50 transition-colors">
+            ← Prev
+          </button>
+          <span className="text-sm font-medium text-[#1a120c] min-w-[140px] text-center">{monthLabel}</span>
+          <button onClick={() => setMonthOffset(o => o + 1)}
+            className="px-4 py-2 border border-[#bfaf9a] text-[#5a4838] rounded-full text-xs uppercase tracking-wider hover:border-[#c74132]/50 transition-colors">
+            Next →
+          </button>
+          {monthOffset !== 0 && (
+            <button onClick={() => setMonthOffset(0)}
+              className="px-4 py-2 bg-[#ede3d5] text-[#5a4838] rounded-full text-xs uppercase tracking-wider">
+              Today
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-4 mb-6">
+        {[['bg-amber-400','Enquiry'],['bg-blue-400','Upcoming'],['bg-emerald-500','Active / On Trip'],['bg-[#bfaf9a]','Completed']].map(([c, l]) => (
+          <div key={l} className="flex items-center gap-1.5 text-xs text-[#7a6858]">
+            <div className={`w-3 h-3 rounded-sm ${c} opacity-90`} />
+            {l}
+          </div>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="space-y-3">
+          {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 rounded-xl" />)}
+        </div>
+      ) : (
+        <div className="border border-[#d6c8b2] rounded-2xl bg-[#fffaf4] overflow-hidden">
+          <div className="overflow-x-auto">
+            <div style={{ minWidth: `${180 + daysInMonth * dayWidth}px` }}>
+
+              {/* Day header */}
+              <div className="flex border-b border-[#d6c8b2] bg-[#f4e8d0] sticky top-0 z-10">
+                <div className="flex-shrink-0 px-4 py-3 text-[10px] uppercase tracking-wider text-[#9e8e7e]" style={{ width: 180 }}>
+                  Vehicle
+                </div>
+                {days.map(d => {
+                  const isToday = d === todayDay;
+                  const dow = new Date(year, month, d).toLocaleDateString('en-IN', { weekday: 'short' }).slice(0, 2);
+                  return (
+                    <div key={d} className={`flex-shrink-0 text-center py-2 border-l border-[#d6c8b2]/50 ${isToday ? 'bg-[#c74132]/10' : ''}`} style={{ width: dayWidth }}>
+                      <div className={`text-[10px] font-mono leading-none ${isToday ? 'text-[#c74132] font-bold' : 'text-[#9e8e7e]'}`}>{d}</div>
+                      <div className={`text-[9px] uppercase mt-0.5 ${isToday ? 'text-[#c74132]' : 'text-[#bfaf9a]'}`}>{dow}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Car rows */}
+              {cars.map(car => (
+                <div key={car.id} className="flex items-center border-b border-[#d6c8b2]/50 last:border-0 hover:bg-[#ede3d5]/30 transition-colors">
+                  <div className="flex-shrink-0 px-4 py-3" style={{ width: 180 }}>
+                    <div className="text-xs text-[#1a120c] font-medium truncate">{car.brand} {car.model}</div>
+                    <div className="text-[10px] text-[#9e8e7e] font-mono mt-0.5">{car.plate_number}</div>
+                  </div>
+                  {days.map(d => {
+                    const b = bookingForDay(car.id, d);
+                    const isToday = d === todayDay;
+                    const date = `${year}-${pad(month + 1)}-${pad(d)}`;
+                    const isStart = b && b.from_date === date;
+                    const prevDate = `${year}-${pad(month + 1)}-${pad(d - 1)}`;
+                    const isFirstInView = b && d === 1 && b.from_date < monthStart;
+                    const nextDate = `${year}-${pad(month + 1)}-${pad(d + 1)}`;
+                    const isEnd = b && (b.to_date === nextDate || d === daysInMonth);
+
+                    return (
+                      <div key={d}
+                        className={`flex-shrink-0 h-10 border-l border-[#d6c8b2]/50 relative ${isToday ? 'bg-[#c74132]/5' : ''} ${b ? 'cursor-pointer' : ''}`}
+                        style={{ width: dayWidth }}
+                        onClick={() => b && setSelected(b)}
+                      >
+                        {b && (
+                          <div className={`absolute top-2 bottom-2 ${barColor[b.status] || 'bg-[#d6c8b2]'} opacity-85
+                            ${(isStart || isFirstInView) ? 'left-1.5 rounded-l-full' : 'left-0'}
+                            ${isEnd ? 'right-1.5 rounded-r-full' : 'right-0'}`}
+                          />
+                        )}
+                        {isToday && (
+                          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#c74132]" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Booking detail card */}
+      <AnimatePresence>
+        {selected && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setSelected(null)}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl p-7 max-w-xs w-full">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <div className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full inline-block mb-2 ${
+                    selected.status === 'enquiry' ? 'bg-amber-100 text-amber-700' :
+                    selected.status === 'upcoming' ? 'bg-blue-100 text-blue-700' :
+                    selected.status === 'active' ? 'bg-emerald-100 text-emerald-700' :
+                    'bg-[#ede3d5] text-[#7a6858]'}`}>{selected.status}</div>
+                  <div className="text-xs font-mono text-[#9e8e7e]">{selected.booking_code}</div>
+                </div>
+                <button onClick={() => setSelected(null)} className="w-8 h-8 rounded-full border border-[#d6c8b2] flex items-center justify-center">
+                  <X className="w-3.5 h-3.5 text-[#7a6858]" />
+                </button>
+              </div>
+              <div className="text-xl font-serif italic text-[#1a120c] mb-1">{selected.customers?.full_name || '—'}</div>
+              <div className="text-sm text-[#7a6858] mb-4">{selected.customers?.phone || ''}</div>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#9e8e7e]">From</div>
+                  <div className="text-[#1a120c] font-mono mt-0.5">{selected.from_date}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#9e8e7e]">Until</div>
+                  <div className="text-[#1a120c] font-mono mt-0.5">{selected.to_date}</div>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -3396,6 +3625,11 @@ export default function App() {
       setView("home");
     }
   }
+
+  useEffect(() => {
+    window.__dk_admin = () => setView("admin-dash");
+    return () => { delete window.__dk_admin; };
+  }, []);
 
   async function handleLogout() {
     await supabase.auth.signOut();
