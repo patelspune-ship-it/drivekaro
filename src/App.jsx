@@ -457,10 +457,10 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
                   <div className="mt-4 flex items-start justify-between">
                     <div>
                       <div className="text-xs text-[#7a6858] uppercase tracking-wider">{car.brand}</div>
-                      <div className="text-lg text-[#1a120c] font-medium">{car.model}</div>
+                      <div className="text-lg text-[#1a120c] font-medium break-words">{car.model}</div>
                       <div className="flex items-center gap-3 mt-2 text-xs text-[#7a6858]">
                         <span className="flex items-center gap-1"><Users className="w-3 h-3" />{car.seats}</span>
-                        <span className="flex items-center gap-1"><Settings className="w-3 h-3" />{car.transmission.slice(0, 4)}</span>
+                        <span className="flex items-center gap-1"><Settings className="w-3 h-3" />{car.transmission === 'Automatic' ? 'Auto' : 'Manual'}</span>
                         <span className="flex items-center gap-1"><Fuel className="w-3 h-3" />{car.fuel}</span>
                       </div>
                     </div>
@@ -1057,7 +1057,7 @@ function FleetPage({ setView, setSelectedCar, searchFrom, searchTo, setSearchFro
                   </div>
                   <div className="grid grid-cols-3 gap-2 py-3 border-y border-[#d6c8b2] text-center">
                     <div><Users className="w-3.5 h-3.5 text-[#7a6858] mx-auto mb-1" /><div className="text-[10px] uppercase tracking-wider text-[#7a6858]">{car.seats} seats</div></div>
-                    <div><Settings className="w-3.5 h-3.5 text-[#7a6858] mx-auto mb-1" /><div className="text-[10px] uppercase tracking-wider text-[#7a6858]">{car.transmission}</div></div>
+                    <div><Settings className="w-3.5 h-3.5 text-[#7a6858] mx-auto mb-1" /><div className="text-[10px] uppercase tracking-wider text-[#7a6858]">{car.transmission === 'Automatic' ? 'Auto' : 'Manual'}</div></div>
                     <div><Fuel className="w-3.5 h-3.5 text-[#7a6858] mx-auto mb-1" /><div className="text-[10px] uppercase tracking-wider text-[#7a6858]">{car.fuel}</div></div>
                   </div>
                   <div className="mt-3 flex items-center justify-between">
@@ -1238,14 +1238,14 @@ function BookingPage({ car, setView, searchFrom, searchTo }) {
             </div>
           </div>
 
-          <div className="mt-8 grid grid-cols-4 gap-4">
-            {[{ l: "Seats", v: car.seats, i: Users },{ l: "Transmission", v: car.transmission, i: Settings },{ l: "Fuel", v: car.fuel, i: Fuel },{ l: "Year", v: car.year, i: Gauge }].map((s, i) => {
+          <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[{ l: "Seats", v: car.seats, i: Users },{ l: "Gearbox", v: car.transmission === 'Automatic' ? 'Auto' : 'Manual', i: Settings },{ l: "Fuel", v: car.fuel, i: Fuel },{ l: "Year", v: car.year, i: Gauge }].map((s, i) => {
               const Icon = s.i;
               return (
                 <div key={i} className="border border-[#d6c8b2] rounded-xl p-4">
                   <Icon className="w-4 h-4 text-[#d4483b] mb-3" />
                   <div className="text-[10px] uppercase tracking-wider text-[#7a6858]">{s.l}</div>
-                  <div className="text-[#1a120c] mt-1">{s.v}</div>
+                  <div className="text-[#1a120c] mt-1 break-words">{s.v}</div>
                 </div>
               );
             })}
@@ -1366,6 +1366,54 @@ function BookingPage({ car, setView, searchFrom, searchTo }) {
   );
 }
 
+/* ========================== PASSWORD RESET MODAL ========================== */
+function PasswordResetModal({ onClose }) {
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleReset() {
+    if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (error) { setError(error.message); return; }
+    setDone(true);
+    setTimeout(onClose, 2500);
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl p-8 max-w-sm w-full">
+        {done ? (
+          <div className="text-center">
+            <div className="text-emerald-600 text-lg font-medium mb-2">Password updated!</div>
+            <div className="text-sm text-[#7a6858]">You can now sign in with your new password.</div>
+          </div>
+        ) : (
+          <>
+            <h2 className="text-2xl font-serif italic text-[#1a120c] mb-2">Set new password</h2>
+            <p className="text-sm text-[#7a6858] mb-5">Choose a new password for your account.</p>
+            <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">New password</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+              placeholder="Min. 6 characters" autoFocus
+              className="w-full mt-1.5 mb-4 bg-[#fffaf4] border border-[#bfaf9a] rounded-lg px-4 py-3 text-[#1a120c] outline-none focus:border-[#c74132]/60 text-sm"
+              onKeyDown={e => e.key === 'Enter' && handleReset()} />
+            {error && <div className="text-red-600 text-xs mb-3">{error}</div>}
+            <button onClick={handleReset} disabled={loading || !password}
+              className="w-full bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] py-3 rounded-full text-xs uppercase tracking-wider disabled:opacity-50 transition-colors">
+              {loading ? "Updating…" : "Update password"}
+            </button>
+          </>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
 /* ========================== CUSTOMER AUTH ========================== */
 function CustomerAuthModal({ onClose }) {
   const [mode, setMode] = useState("signin");
@@ -1378,6 +1426,17 @@ function CustomerAuthModal({ onClose }) {
   const [notice, setNotice] = useState("");
 
   function reset() { setError(""); setNotice(""); }
+
+  async function handleForgotPassword() {
+    if (!email) { setError("Enter your email first."); return; }
+    setLoading(true); reset();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+    setLoading(false);
+    if (error) { setError(error.message); return; }
+    setNotice("Password reset link sent to " + email + ". Check your inbox.");
+  }
 
   async function handleSignIn() {
     setLoading(true); reset();
@@ -1442,14 +1501,24 @@ function CustomerAuthModal({ onClose }) {
         </div>
 
         {/* Mode tabs */}
-        <div className="flex mb-6 bg-[#ede3d5] rounded-full p-1">
-          {["signin", "signup"].map(m => (
-            <button key={m} onClick={() => { setMode(m); reset(); }}
-              className={`flex-1 py-2 rounded-full text-xs uppercase tracking-wider transition-all ${mode === m ? "bg-[#fffaf4] text-[#1a120c] shadow-sm" : "text-[#7a6858]"}`}>
-              {m === "signin" ? "Sign in" : "Create account"}
+        {mode !== 'forgot' && (
+          <div className="flex mb-6 bg-[#ede3d5] rounded-full p-1">
+            {["signin", "signup"].map(m => (
+              <button key={m} onClick={() => { setMode(m); reset(); }}
+                className={`flex-1 py-2 rounded-full text-xs uppercase tracking-wider transition-all ${mode === m ? "bg-[#fffaf4] text-[#1a120c] shadow-sm" : "text-[#7a6858]"}`}>
+                {m === "signin" ? "Sign in" : "Create account"}
+              </button>
+            ))}
+          </div>
+        )}
+        {mode === 'forgot' && (
+          <div className="mb-6">
+            <button onClick={() => { setMode('signin'); reset(); }} className="text-xs text-[#7a6858] hover:text-[#1a120c] flex items-center gap-1">
+              ← Back to sign in
             </button>
-          ))}
-        </div>
+            <div className="text-base font-medium text-[#1a120c] mt-2">Reset your password</div>
+          </div>
+        )}
 
         <AnimatePresence mode="wait">
           <motion.div key={mode} {...fadeUp} className="space-y-3">
@@ -1494,12 +1563,27 @@ function CustomerAuthModal({ onClose }) {
               </div>
             )}
 
-            <button
-              onClick={mode === "signin" ? handleSignIn : handleSignUp}
-              disabled={loading || !email || !password || (mode === "signup" && (!name || phone.replace(/\D/g,'').length !== 10))}
-              className="w-full bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] py-3 rounded-full text-xs uppercase tracking-wider disabled:opacity-50 transition-colors mt-2">
-              {loading ? (mode === "signin" ? "Signing in…" : "Creating account…") : (mode === "signin" ? "Sign in" : "Create account")}
-            </button>
+            {mode === 'forgot' ? (
+              <button onClick={handleForgotPassword} disabled={loading || !email}
+                className="w-full bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] py-3 rounded-full text-xs uppercase tracking-wider disabled:opacity-50 transition-colors mt-2">
+                {loading ? "Sending…" : "Send reset link"}
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={mode === "signin" ? handleSignIn : handleSignUp}
+                  disabled={loading || !email || !password || (mode === "signup" && (!name || phone.replace(/\D/g,'').length !== 10))}
+                  className="w-full bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] py-3 rounded-full text-xs uppercase tracking-wider disabled:opacity-50 transition-colors mt-2">
+                  {loading ? (mode === "signin" ? "Signing in…" : "Creating account…") : (mode === "signin" ? "Sign in" : "Create account")}
+                </button>
+                {mode === "signin" && (
+                  <button onClick={() => { setMode('forgot'); reset(); }}
+                    className="w-full text-center text-xs text-[#9e8e7e] hover:text-[#5a4838] mt-2 transition-colors">
+                    Forgot password?
+                  </button>
+                )}
+              </>
+            )}
           </motion.div>
         </AnimatePresence>
       </motion.div>
@@ -2475,9 +2559,10 @@ function AdminBookings() {
   const [offlineForm, setOfflineForm] = useState({ car_id: "", customer_name: "", customer_phone: "", from_date: "", to_date: "", status: "upcoming" });
   const [offlineError, setOfflineError] = useState("");
   const [offlineSaving, setOfflineSaving] = useState(false);
-  const [endingTrip, setEndingTrip] = useState(null); // booking object
+  const [endingTrip, setEndingTrip] = useState(null);
   const [actualPayment, setActualPayment] = useState("");
   const [tripLoading, setTripLoading] = useState(false);
+  const [whatsappCta, setWhatsappCta] = useState(null); // { url, label }
 
   async function loadBookings() {
     setLoading(true);
@@ -2496,6 +2581,14 @@ function AdminBookings() {
       setBookings(data || []);
     }
     setLoading(false);
+  }
+
+  function waUrl(phone, msg) {
+    const num = (phone || '').replace(/\D/g, '');
+    return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
+  }
+  function fmtDate(d) {
+    return d ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : d;
   }
 
   async function confirmEnquiry(b) {
@@ -2541,6 +2634,20 @@ function AdminBookings() {
       status: 'pending',
     });
 
+    // Auto-reject other enquiries for the same car & overlapping dates
+    await supabase.from('bookings')
+      .update({ status: 'cancelled' })
+      .eq('car_id', b.car_id)
+      .eq('status', 'enquiry')
+      .neq('id', b.id)
+      .lte('from_date', b.to_date)
+      .gte('to_date', b.from_date);
+
+    // WhatsApp CTA for customer
+    const firstName = b.customers?.full_name?.split(' ')[0] || 'there';
+    const msg = `Hi ${firstName}! ✅ Your DriveKaro booking is confirmed!\n\n🚗 Car: ${b.cars?.model}\n📅 Pickup: ${fmtDate(b.from_date)} at 12:00 AM\n📅 Return by: ${fmtDate(b.to_date)} at 12:00 AM\n📍 Pune Hub, NIBM Road\n\nRef: ${b.booking_code}\nQuestions? Call +91 76663 98984\n\n- DriveKaro 🚘`;
+    setWhatsappCta({ url: waUrl(b.customers?.phone, msg), label: `WhatsApp ${b.customers?.full_name?.split(' ')[0] || 'customer'} — booking confirmed` });
+
     setConfirmingId(null);
     loadBookings();
   }
@@ -2548,9 +2655,12 @@ function AdminBookings() {
   async function startTrip(b) {
     setTripLoading(true);
     const { error } = await supabase.from('bookings').update({ status: 'active' }).eq('id', b.id);
-    if (error) alert("Could not start trip: " + error.message);
+    if (error) { alert("Could not start trip: " + error.message); setTripLoading(false); return; }
     setTripLoading(false);
     loadBookings();
+    const firstName = b.customers?.full_name?.split(' ')[0] || 'there';
+    const msg = `Hi ${firstName}! 🚗 Your DriveKaro trip has started!\n\nCar: ${b.cars?.model}\nReturn by: ${fmtDate(b.to_date)} at 12:00 AM\n\nDrive safe! For any help: +91 76663 98984\n- DriveKaro`;
+    setWhatsappCta({ url: waUrl(b.customers?.phone, msg), label: `WhatsApp ${firstName} — trip started` });
   }
 
   async function endTrip() {
@@ -2563,10 +2673,14 @@ function AdminBookings() {
       payment_status: 'paid',
     }).eq('id', endingTrip.id);
     if (error) { alert("Could not end trip: " + error.message); setTripLoading(false); return; }
+    const b = endingTrip;
     setTripLoading(false);
     setEndingTrip(null);
     setActualPayment("");
     loadBookings();
+    const firstName = b.customers?.full_name?.split(' ')[0] || 'there';
+    const msg = `Hi ${firstName}! 🙏 Thank you for choosing DriveKaro!\n\nYour ${b.cars?.model} trip is complete. Hope you had a great drive!\n\nPlease leave us a review on Google — it means a lot! ⭐\nSee you next time! - DriveKaro`;
+    setWhatsappCta({ url: waUrl(b.customers?.phone, msg), label: `WhatsApp ${firstName} — trip completed` });
   }
 
   useEffect(() => {
@@ -2794,6 +2908,25 @@ function AdminBookings() {
           ))}
         </div>
       )}
+
+      {/* WhatsApp CTA toast */}
+      <AnimatePresence>
+        {whatsappCta && (
+          <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-[#1a120c] text-[#f4e8d0] px-5 py-3 rounded-2xl shadow-2xl max-w-sm w-full mx-4">
+            <a href={whatsappCta.url} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-2 flex-1 text-sm font-medium">
+              <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="#25D366">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+              </svg>
+              {whatsappCta.label}
+            </a>
+            <button onClick={() => setWhatsappCta(null)} className="text-[#f4e8d0]/50 hover:text-[#f4e8d0] ml-2">
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* End Trip — payment modal */}
       <AnimatePresence>
@@ -3741,6 +3874,7 @@ export default function App() {
   const [customerSession, setCustomerSession] = useState(null);
   const [customerProfile, setCustomerProfile] = useState(null);
   const [showCustomerAuth, setShowCustomerAuth] = useState(false);
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [searchFrom, setSearchFrom] = useState(todayStr);
   const [searchTo, setSearchTo] = useState(() => plusDays(3));
@@ -3772,6 +3906,7 @@ export default function App() {
       applySession(session).then(() => setAuthLoading(false));
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (_event === 'PASSWORD_RECOVERY') { setShowPasswordReset(true); return; }
       applySession(session);
     });
     return () => subscription.unsubscribe();
@@ -3829,6 +3964,9 @@ export default function App() {
       <Nav view={view} setView={setView} ownerSession={ownerSession} customerProfile={customerProfile} onScrollTo={handleScrollTo} onCustomerSignIn={() => setShowCustomerAuth(true)} onCustomerSignOut={async () => { await supabase.auth.signOut(); }} />
       <AnimatePresence>
         {showCustomerAuth && <CustomerAuthModal onClose={() => setShowCustomerAuth(false)} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showPasswordReset && <PasswordResetModal onClose={() => setShowPasswordReset(false)} />}
       </AnimatePresence>
 
       <main className="relative z-10">
