@@ -1102,6 +1102,16 @@ function BookingPage({ car, setView, searchFrom, searchTo }) {
   async function checkAvailability() {
     setAvailabilityChecking(true);
     setAvailabilityError("");
+    if (from < todayStr()) {
+      setAvailabilityError("Pickup date cannot be in the past. Please choose today or a future date.");
+      setAvailabilityChecking(false);
+      return false;
+    }
+    if (to <= from) {
+      setAvailabilityError("Return date must be after the pickup date.");
+      setAvailabilityChecking(false);
+      return false;
+    }
     const { data, error: qErr } = await supabase
       .from('bookings')
       .select('booking_code, from_date, to_date')
@@ -1730,7 +1740,6 @@ function AdminDashboard({ setView, onLogout, ownerEmail }) {
     { id: "overview", label: "Overview", icon: LayoutGrid },
     { id: "fleet", label: "Fleet", icon: Car },
     { id: "bookings", label: "Bookings", icon: Calendar },
-    { id: "calendar", label: "Calendar", icon: CalendarDays },
     { id: "invoices", label: "Invoices", icon: Receipt },
     { id: "customers", label: "Customers", icon: Users },
     { id: "maintenance", label: "Service", icon: Wrench },
@@ -1785,7 +1794,6 @@ function AdminDashboard({ setView, onLogout, ownerEmail }) {
             {section === "bookings" && <AdminBookings key="bk" />}
             {section === "invoices" && <AdminInvoices key="iv" />}
             {section === "customers" && <AdminCustomers key="cu" />}
-            {section === "calendar" && <AdminCalendar key="cal" />}
             {section === "maintenance" && <AdminMaintenance key="mt" />}
           </AnimatePresence>
         </div>
@@ -2022,6 +2030,7 @@ function CarEditModal({ car, onClose, onSaved }) {
     seats: car.seats || 5,
     price_per_day: car.price_per_day || 2500,
     odometer: car.odometer || 0,
+    status: car.status || "available",
   });
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(car.image_url || null);
@@ -2066,6 +2075,7 @@ function CarEditModal({ car, onClose, onSaved }) {
         seats: parseInt(form.seats),
         price_per_day: parseInt(form.price_per_day),
         odometer: parseInt(form.odometer),
+        status: form.status,
         image_url: imageUrl,
       }).eq('id', car.id);
 
@@ -2177,6 +2187,14 @@ function CarEditModal({ car, onClose, onSaved }) {
                 <option>Petrol</option><option>Diesel</option><option>Electric</option><option>CNG</option>
               </select>
             </div>
+            <div className="col-span-2">
+              <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">Car status</label>
+              <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}
+                className="w-full mt-1.5 bg-[#ede3d5] border border-[#bfaf9a] rounded-lg px-4 py-2.5 text-[#1a120c]">
+                <option value="available">Available — visible to customers</option>
+                <option value="maintenance">In Service — hidden from customers</option>
+              </select>
+            </div>
           </div>
 
           {error && (
@@ -2205,6 +2223,7 @@ function CarEditModal({ car, onClose, onSaved }) {
 function AdminFleet() {
   const [showAdd, setShowAdd] = useState(false);
   const [editingCar, setEditingCar] = useState(null);
+  const [calendarCar, setCalendarCar] = useState(null);
   const [cars, setCars] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2339,13 +2358,15 @@ function AdminFleet() {
               </div>
               <div className="col-span-2 text-xs font-mono text-[#3d2e1e]">{car.plate_number}</div>
               <div className="col-span-2">
-                <button onClick={() => toggleStatus(car)} className="hover:opacity-80">
-                  <StatusDot status={car.status} />
-                </button>
+                <StatusDot status={car.status} />
               </div>
               <div className="col-span-1 text-[#1a120c] font-mono text-sm">{car.total_trips}</div>
               <div className="col-span-2 text-[#1a120c] font-mono">{formatINR(car.price_per_day)}</div>
               <div className="col-span-1 flex justify-end gap-1">
+                <button onClick={() => setCalendarCar(car)}
+                  className="w-8 h-8 rounded-lg border border-[#bfaf9a] hover:border-[#c74132]/60 flex items-center justify-center transition-colors">
+                  <CalendarDays className="w-3.5 h-3.5 text-[#5a4838]" />
+                </button>
                 <button onClick={() => setEditingCar(car)}
                   className="w-8 h-8 rounded-lg border border-[#bfaf9a] hover:border-[#c74132]/60 flex items-center justify-center transition-colors">
                   <Edit3 className="w-3.5 h-3.5 text-[#5a4838]" />
@@ -2432,6 +2453,12 @@ function AdminFleet() {
             onClose={() => setEditingCar(null)}
             onSaved={() => { setEditingCar(null); loadCars(); }}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {calendarCar && (
+          <CarCalendarModal car={calendarCar} onClose={() => setCalendarCar(null)} />
         )}
       </AnimatePresence>
     </motion.div>
@@ -3145,6 +3172,151 @@ function AdminCustomers() {
           ))}
         </div>
       )}
+    </motion.div>
+  );
+}
+
+/* ========================== CAR CALENDAR MODAL ========================== */
+function CarCalendarModal({ car, onClose }) {
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+
+  const today = new Date();
+  const viewDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const pad = n => String(n).padStart(2, '0');
+  const monthStart = `${year}-${pad(month + 1)}-01`;
+  const monthEnd = `${year}-${pad(month + 1)}-${pad(daysInMonth)}`;
+  const monthLabel = viewDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  const todayDay = today.getMonth() === month && today.getFullYear() === year ? today.getDate() : null;
+
+  // Monday-first offset
+  const firstDow = (new Date(year, month, 1).getDay() + 6) % 7; // Mon=0
+  const cells = [...Array(firstDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  while (cells.length % 7) cells.push(null);
+
+  useEffect(() => {
+    setLoading(true);
+    supabase.from('bookings')
+      .select('id, booking_code, from_date, to_date, status, customers(full_name, phone)')
+      .eq('car_id', car.id)
+      .not('status', 'eq', 'cancelled')
+      .lte('from_date', monthEnd)
+      .gte('to_date', monthStart)
+      .then(({ data }) => { setBookings(data || []); setLoading(false); });
+  }, [monthOffset]);
+
+  function bookingForDay(day) {
+    const date = `${year}-${pad(month + 1)}-${pad(day)}`;
+    // block from_date inclusive, to_date exclusive (midnight-to-midnight policy)
+    return bookings.find(b => date >= b.from_date && date < b.to_date);
+  }
+
+  const cfg = {
+    enquiry:   { bg: 'bg-amber-100 text-amber-800',   dot: 'bg-amber-400',   label: 'Enquiry' },
+    upcoming:  { bg: 'bg-blue-100 text-blue-800',     dot: 'bg-blue-500',    label: 'Upcoming' },
+    active:    { bg: 'bg-emerald-100 text-emerald-800', dot: 'bg-emerald-500', label: 'On Trip' },
+    completed: { bg: 'bg-[#ede3d5] text-[#7a6858]',   dot: 'bg-[#bfaf9a]',  label: 'Done' },
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+        onClick={e => e.stopPropagation()}
+        className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl p-6 w-full max-w-md">
+
+        {/* Header */}
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <div className="text-xs uppercase tracking-wider text-[#7a6858]">Availability</div>
+            <div className="text-xl font-serif italic text-[#1a120c]">{car.brand} {car.model}</div>
+            <div className="text-[10px] font-mono text-[#9e8e7e]">{car.plate_number}</div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full border border-[#d6c8b2] flex items-center justify-center">
+            <X className="w-3.5 h-3.5 text-[#7a6858]" />
+          </button>
+        </div>
+
+        {/* Month nav */}
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={() => setMonthOffset(o => o - 1)}
+            className="w-8 h-8 rounded-full border border-[#d6c8b2] flex items-center justify-center text-[#5a4838] hover:border-[#c74132]/50 transition-colors text-sm">‹</button>
+          <span className="text-sm font-medium text-[#1a120c]">{monthLabel}</span>
+          <button onClick={() => setMonthOffset(o => o + 1)}
+            className="w-8 h-8 rounded-full border border-[#d6c8b2] flex items-center justify-center text-[#5a4838] hover:border-[#c74132]/50 transition-colors text-sm">›</button>
+        </div>
+
+        {/* Day-of-week headers */}
+        <div className="grid grid-cols-7 mb-1">
+          {['Mo','Tu','We','Th','Fr','Sa','Su'].map(d => (
+            <div key={d} className="text-center text-[10px] uppercase tracking-wider text-[#9e8e7e] py-1">{d}</div>
+          ))}
+        </div>
+
+        {/* Calendar grid */}
+        {loading ? (
+          <div className="grid grid-cols-7 gap-1">
+            {[...Array(35)].map((_, i) => <Skeleton key={i} className="h-10 rounded-lg" />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-7 gap-1">
+            {cells.map((day, i) => {
+              if (!day) return <div key={i} />;
+              const b = bookingForDay(day);
+              const isToday = day === todayDay;
+              const style = b ? cfg[b.status] : null;
+              return (
+                <button key={i}
+                  onClick={() => b && setSelected(b)}
+                  className={`h-10 rounded-xl text-sm font-medium transition-all relative flex items-center justify-center
+                    ${b ? `${style.bg} cursor-pointer hover:opacity-80` : 'text-[#1a120c] hover:bg-[#ede3d5]'}
+                    ${isToday && !b ? 'ring-2 ring-[#c74132] ring-offset-1' : ''}
+                    ${isToday && b ? 'ring-2 ring-[#c74132]' : ''}
+                  `}>
+                  {day}
+                  {b && <div className={`absolute bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${style.dot}`} />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Legend */}
+        <div className="flex flex-wrap gap-3 mt-5 pt-4 border-t border-[#d6c8b2]">
+          {Object.entries(cfg).map(([k, v]) => (
+            <div key={k} className="flex items-center gap-1.5 text-[10px] text-[#7a6858]">
+              <div className={`w-2.5 h-2.5 rounded-sm ${v.dot}`} />{v.label}
+            </div>
+          ))}
+        </div>
+      </motion.div>
+
+      {/* Booking detail */}
+      <AnimatePresence>
+        {selected && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+            onClick={() => setSelected(null)}
+            className="fixed inset-0 z-60 flex items-center justify-center p-4">
+            <div onClick={e => e.stopPropagation()} className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl p-6 max-w-xs w-full shadow-xl">
+              <div className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full inline-block mb-3 ${cfg[selected.status]?.bg}`}>{selected.status}</div>
+              <div className="text-lg font-serif italic text-[#1a120c] mb-1">{selected.customers?.full_name || '—'}</div>
+              <div className="text-sm text-[#7a6858] mb-3">{selected.customers?.phone}</div>
+              <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                <div><div className="text-[#9e8e7e] mb-0.5">From</div><div className="font-mono text-[#1a120c]">{selected.from_date}</div></div>
+                <div><div className="text-[#9e8e7e] mb-0.5">Until</div><div className="font-mono text-[#1a120c]">{selected.to_date}</div></div>
+              </div>
+              <div className="text-[10px] font-mono text-[#9e8e7e]">{selected.booking_code}</div>
+              <button onClick={() => setSelected(null)} className="mt-4 w-full py-2 border border-[#d6c8b2] rounded-full text-xs text-[#5a4838]">Close</button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
