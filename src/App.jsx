@@ -336,7 +336,7 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
             </motion.h1>
             <motion.div {...stagger(0.2)} className="lg:col-span-3 lg:pb-6">
               <p className="text-[#5a4838] text-base leading-relaxed border-l border-[#bfaf9a] pl-4">
-                A curated fleet of 24 self-drive cars from Pune. No driver, no schedule, no compromise. Pick a car. Drive away.
+                A curated fleet of self-drive cars from Pune. No driver, no schedule, no compromise. Pick a car. Drive away.
               </p>
             </motion.div>
           </div>
@@ -381,8 +381,8 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
           <motion.div {...stagger(0.4)} className="mt-20 border-t border-[#d6c8b2] pt-10">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">
               {[
-                { num: "24", label: "Cars in fleet" },
-                { num: "1.2k+", label: "Trips completed" },
+                { num: "4", label: "Cars in fleet" },
+                { num: "150+", label: "Trips completed" },
                 { num: "4.9", label: "Google rating", suffix: "★" },
                 { num: "24/7", label: "Always available" },
               ].map((s, i) => (
@@ -426,7 +426,7 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
               viewport={{ once: true }} transition={{ duration: 0.6, delay: 0.35, ease: [0.22, 1, 0.36, 1] }} />
           </motion.div>
           <button onClick={() => setView("fleet")} className="text-sm uppercase tracking-wider text-[#5a4838] hover:text-[#d4483b] inline-flex items-center gap-2 group">
-            View all 24 cars
+            View all cars
             <ArrowUpRight className="w-4 h-4 group-hover:rotate-45 transition-transform" />
           </button>
         </div>
