@@ -181,13 +181,31 @@ function NoiseOverlay() {
 }
 
 function CarVisual({ car, large = false }) {
-  const hasPhoto = !!car.image_url;
+  const allImages = (car.image_urls?.length > 0 ? car.image_urls : [car.image_url]).filter(Boolean);
+  const hasPhotos = allImages.length > 0;
+  const [idx, setIdx] = useState(0);
+  const currentImg = allImages[Math.min(idx, allImages.length - 1)];
+
   return (
-    <div className={`relative overflow-hidden rounded-2xl ${hasPhoto ? "bg-zinc-900" : `bg-gradient-to-br ${car.gradient}`} ${large ? "h-72" : "h-44"} group`}>
-      {hasPhoto ? (
+    <div className={`relative overflow-hidden rounded-2xl ${hasPhotos ? "bg-zinc-900" : `bg-gradient-to-br ${car.gradient}`} ${large ? "h-[26rem]" : "h-64"} group`}>
+      {hasPhotos ? (
         <>
-          <img src={car.image_url} alt={car.model} className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-black/30" />
+          <img src={currentImg} alt={car.model} className="absolute inset-0 w-full h-full object-cover transition-all duration-500" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/20" />
+          {allImages.length > 1 && (
+            <>
+              <button onClick={e => { e.stopPropagation(); setIdx(i => (i - 1 + allImages.length) % allImages.length); }}
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white text-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70 z-10">‹</button>
+              <button onClick={e => { e.stopPropagation(); setIdx(i => (i + 1) % allImages.length); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white text-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70 z-10">›</button>
+              <div className="absolute bottom-14 left-0 right-0 flex justify-center gap-1.5 z-10">
+                {allImages.map((_, i) => (
+                  <button key={i} onClick={e => { e.stopPropagation(); setIdx(i); }}
+                    className={`rounded-full transition-all ${i === idx ? 'w-4 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/50'}`} />
+                ))}
+              </div>
+            </>
+          )}
         </>
       ) : (
         <>
@@ -295,7 +313,7 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
     ];
     supabase
       .from('cars')
-      .select('id, brand, model, year, category, seats, transmission, fuel, price_per_day, status, plate_number, rating, total_trips, image_url')
+      .select('id, brand, model, year, category, seats, transmission, fuel, price_per_day, status, plate_number, rating, total_trips, image_url, image_urls')
       .eq('status', 'available')
       .order('price_per_day', { ascending: false })
       .limit(6)
@@ -305,7 +323,9 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
           category: c.category, seats: c.seats, transmission: c.transmission,
           fuel: c.fuel, pricePerDay: c.price_per_day, status: c.status,
           plate: c.plate_number, rating: c.rating, trips: c.total_trips,
-          image_url: c.image_url || null, gradient: gradients[i % gradients.length],
+          image_url: c.image_url || null,
+          image_urls: c.image_urls || [],
+          gradient: gradients[i % gradients.length],
         })));
       });
   }, []);
@@ -892,6 +912,7 @@ function FleetPage({ setView, setSelectedCar, searchFrom, searchTo, setSearchFro
         rating: c.rating,
         trips: c.total_trips,
         image_url: c.image_url || null,
+        image_urls: c.image_urls || [],
         gradient: gradients[i % gradients.length]
       }));
       setCars(mapped);
@@ -2116,51 +2137,51 @@ function CarEditModal({ car, onClose, onSaved }) {
     odometer: car.odometer || 0,
     status: car.status || "available",
   });
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState(car.image_url || null);
+
+  // Existing saved photos (URLs from DB)
+  const [savedPhotos, setSavedPhotos] = useState(() => {
+    const all = [...(car.image_urls || [])];
+    if (car.image_url && !all.includes(car.image_url)) all.unshift(car.image_url);
+    return all.filter(Boolean);
+  });
+  // New files picked by user (not yet uploaded)
+  const [newFiles, setNewFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [uploadProgress, setUploadProgress] = useState("");
 
-  function handleFileChange(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+  const totalPhotos = savedPhotos.length + newFiles.length;
+
+  function handleFilesChange(e) {
+    const files = Array.from(e.target.files);
+    const canAdd = Math.min(files.length, 5 - totalPhotos);
+    const toAdd = files.slice(0, canAdd).map(f => ({ file: f, preview: URL.createObjectURL(f) }));
+    setNewFiles(prev => [...prev, ...toAdd]);
+    e.target.value = "";
   }
 
   async function handleSave() {
     setSaving(true);
     setError("");
     try {
-      let imageUrl = car.image_url || null;
+      setUploadProgress(newFiles.length > 0 ? `Uploading ${newFiles.length} photo${newFiles.length > 1 ? 's' : ''}…` : "");
+      const uploadedUrls = await Promise.all(newFiles.map(async ({ file }) => {
+        const ext = file.name.split('.').pop().toLowerCase();
+        const path = `${car.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const { error: upErr } = await supabase.storage.from('car-images').upload(path, file, { contentType: file.type });
+        if (upErr) throw new Error("Upload failed: " + upErr.message);
+        return supabase.storage.from('car-images').getPublicUrl(path).data.publicUrl;
+      }));
 
-      if (imageFile) {
-        setUploadProgress("Uploading photo…");
-        const ext = imageFile.name.split('.').pop().toLowerCase();
-        const path = `${car.id}.${ext}`;
-        const { error: upErr } = await supabase.storage
-          .from('car-images')
-          .upload(path, imageFile, { upsert: true, contentType: imageFile.type });
-        if (upErr) throw new Error("Photo upload failed: " + upErr.message);
-        const { data: { publicUrl } } = supabase.storage.from('car-images').getPublicUrl(path);
-        imageUrl = publicUrl;
-        setUploadProgress("");
-      }
-
+      const allUrls = [...savedPhotos, ...uploadedUrls];
       const { error: updateErr } = await supabase.from('cars').update({
-        brand: form.brand,
-        model: form.model,
-        year: parseInt(form.year),
-        plate_number: form.plate_number,
-        category: form.category,
-        transmission: form.transmission,
-        fuel: form.fuel,
-        seats: parseInt(form.seats),
-        price_per_day: parseInt(form.price_per_day),
-        odometer: parseInt(form.odometer),
-        status: form.status,
-        image_url: imageUrl,
+        brand: form.brand, model: form.model, year: parseInt(form.year),
+        plate_number: form.plate_number, category: form.category,
+        transmission: form.transmission, fuel: form.fuel,
+        seats: parseInt(form.seats), price_per_day: parseInt(form.price_per_day),
+        odometer: parseInt(form.odometer), status: form.status,
+        image_url: allUrls[0] || null,
+        image_urls: allUrls,
       }).eq('id', car.id);
 
       if (updateErr) throw updateErr;
@@ -2202,38 +2223,44 @@ function CarEditModal({ car, onClose, onSaved }) {
         </div>
 
         <div className="px-8 py-6 space-y-6">
-          {/* Photo upload */}
+          {/* Photo upload — multiple */}
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-[#7a6858] mb-2">Car photo</div>
-            <label className="cursor-pointer block group">
-              <div className={`relative rounded-xl overflow-hidden border-2 border-dashed transition-colors ${imagePreview ? "border-[#bfaf9a]" : "border-[#bfaf9a] hover:border-[#c74132]"} h-48`}>
-                {imagePreview ? (
-                  <>
-                    <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                      <Edit3 className="w-5 h-5 text-white" />
-                      <span className="text-white text-sm font-medium">Change photo</span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-[#9e8e7e] group-hover:text-[#c74132] transition-colors">
-                    <div className="w-12 h-12 rounded-full border-2 border-dashed border-current flex items-center justify-center">
-                      <Plus className="w-6 h-6" />
-                    </div>
-                    <div className="text-center">
-                      <div className="text-sm font-medium">Upload car photo</div>
-                      <div className="text-xs mt-0.5">JPG, PNG or WEBP · customers will see this</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileChange} />
-            </label>
-            {imageFile && (
-              <div className="mt-2 text-xs text-[#7a6858]">
-                {imageFile.name} · {(imageFile.size / 1024).toFixed(0)} KB — will upload on save
-              </div>
-            )}
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-[#7a6858]">Car photos ({totalPhotos}/5)</div>
+              <div className="text-[10px] text-[#9e8e7e]">First photo shown as main. Tap arrows on card to browse.</div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {/* Existing saved photos */}
+              {savedPhotos.map((url, i) => (
+                <div key={url} className="relative aspect-[4/3] rounded-xl overflow-hidden group border border-[#bfaf9a]">
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                  {i === 0 && <div className="absolute top-1.5 left-1.5 bg-[#c74132] text-white text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full">Main</div>}
+                  <button onClick={() => setSavedPhotos(p => p.filter((_, j) => j !== i))}
+                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <X className="w-3 h-3 text-white" />
+                  </button>
+                </div>
+              ))}
+              {/* New files (not yet uploaded) */}
+              {newFiles.map((f, i) => (
+                <div key={i} className="relative aspect-[4/3] rounded-xl overflow-hidden group border-2 border-dashed border-[#c74132]/40">
+                  <img src={f.preview} alt="" className="w-full h-full object-cover opacity-80" />
+                  <div className="absolute bottom-1 left-1 bg-[#c74132]/80 text-white text-[9px] px-1.5 py-0.5 rounded-full">New</div>
+                  <button onClick={() => setNewFiles(p => p.filter((_, j) => j !== i))}
+                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <X className="w-3 h-3 text-white" />
+                  </button>
+                </div>
+              ))}
+              {/* Add button */}
+              {totalPhotos < 5 && (
+                <label className="aspect-[4/3] rounded-xl border-2 border-dashed border-[#bfaf9a] hover:border-[#c74132] flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-colors text-[#9e8e7e] hover:text-[#c74132]">
+                  <Plus className="w-6 h-6" />
+                  <span className="text-[10px] uppercase tracking-wider">Add photo</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={handleFilesChange} />
+                </label>
+              )}
+            </div>
           </div>
 
           {/* Fields */}
@@ -2549,6 +2576,93 @@ function AdminFleet() {
   );
 }
 
+function BookingEditModal({ booking: b, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    from_date: b.from_date || '',
+    to_date: b.to_date || '',
+    status: b.status || 'upcoming',
+    total: String(b.total || ''),
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSave() {
+    setSaving(true);
+    const newTotal = parseFloat(form.total) || b.total;
+    const { error: err } = await supabase.from('bookings').update({
+      from_date: form.from_date,
+      to_date: form.to_date,
+      status: form.status,
+      total: newTotal,
+      subtotal: newTotal,
+    }).eq('id', b.id);
+    setSaving(false);
+    if (err) { setError(err.message); return; }
+    onSaved();
+  }
+
+  const inputCls = "w-full mt-1.5 bg-[#ede3d5] border border-[#bfaf9a] rounded-lg px-4 py-2.5 text-[#1a120c] outline-none focus:border-[#c74132]/60";
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+        onClick={e => e.stopPropagation()}
+        className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl p-7 max-w-sm w-full">
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <div className="text-xs uppercase tracking-wider text-[#7a6858]">Edit booking</div>
+            <div className="text-xl font-serif italic text-[#1a120c] mt-0.5">{b.customers?.full_name}</div>
+            <div className="text-xs font-mono text-[#9e8e7e]">{b.booking_code} · {b.cars?.model}</div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full border border-[#d6c8b2] flex items-center justify-center">
+            <X className="w-3.5 h-3.5 text-[#7a6858]" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">From date</label>
+              <input type="date" value={form.from_date} onChange={e => setForm({ ...form, from_date: e.target.value })}
+                className={inputCls + " [color-scheme:light]"} />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">To date</label>
+              <input type="date" value={form.to_date} onChange={e => setForm({ ...form, to_date: e.target.value })}
+                className={inputCls + " [color-scheme:light]"} />
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">Total amount (₹)</label>
+            <input type="number" value={form.total} onChange={e => setForm({ ...form, total: e.target.value })}
+              className={inputCls + " font-mono"} />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">Status</label>
+            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className={inputCls}>
+              <option value="enquiry">Enquiry</option>
+              <option value="upcoming">Upcoming</option>
+              <option value="active">Active (on trip)</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+          {error && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose} className="px-5 py-2.5 border border-[#bfaf9a] text-[#5a4838] rounded-full text-xs uppercase tracking-wider">Cancel</button>
+            <button onClick={handleSave} disabled={saving}
+              className="flex-1 bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] py-2.5 rounded-full text-xs uppercase tracking-wider disabled:opacity-50 transition-colors">
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function AdminBookings() {
   const [tab, setTab] = useState("all");
   const [showOffline, setShowOffline] = useState(false);
@@ -2556,13 +2670,15 @@ function AdminBookings() {
   const [loading, setLoading] = useState(true);
   const [confirmingId, setConfirmingId] = useState(null);
   const [cars, setCars] = useState([]);
-  const [offlineForm, setOfflineForm] = useState({ car_id: "", customer_name: "", customer_phone: "", from_date: "", to_date: "", status: "upcoming" });
+  const [offlineForm, setOfflineForm] = useState({ car_id: "", customer_name: "", customer_phone: "", from_date: "", to_date: "", status: "upcoming", amount: "" });
   const [offlineError, setOfflineError] = useState("");
   const [offlineSaving, setOfflineSaving] = useState(false);
   const [endingTrip, setEndingTrip] = useState(null);
   const [actualPayment, setActualPayment] = useState("");
   const [tripLoading, setTripLoading] = useState(false);
-  const [whatsappCta, setWhatsappCta] = useState(null); // { url, label }
+  const [whatsappCta, setWhatsappCta] = useState(null);
+  const [editingBooking, setEditingBooking] = useState(null);
+  const [deletingBookingId, setDeletingBookingId] = useState(null);
 
   async function loadBookings() {
     setLoading(true);
@@ -2581,6 +2697,14 @@ function AdminBookings() {
       setBookings(data || []);
     }
     setLoading(false);
+  }
+
+  async function deleteBooking(id) {
+    await supabase.from('invoices').delete().eq('booking_id', id);
+    const { error } = await supabase.from('bookings').delete().eq('id', id);
+    if (error) { alert('Delete failed: ' + error.message); return; }
+    setDeletingBookingId(null);
+    loadBookings();
   }
 
   function waUrl(phone, msg) {
@@ -2688,6 +2812,16 @@ function AdminBookings() {
     supabase.from('cars').select('id, brand, model, plate_number, price_per_day').then(({ data }) => setCars(data || []));
   }, []);
 
+  // Auto-fill amount when car + dates are selected
+  useEffect(() => {
+    const { car_id, from_date, to_date } = offlineForm;
+    if (!car_id || !from_date || !to_date) return;
+    const carInfo = cars.find(c => c.id === car_id);
+    if (!carInfo) return;
+    const days = Math.max(1, Math.ceil((new Date(to_date) - new Date(from_date)) / 86400000));
+    setOfflineForm(f => ({ ...f, amount: String(carInfo.price_per_day * days) }));
+  }, [offlineForm.car_id, offlineForm.from_date, offlineForm.to_date]);
+
   async function handleOfflineSubmit(e) {
     e.preventDefault();
     setOfflineError("");
@@ -2725,9 +2859,7 @@ function AdminBookings() {
     }
 
     const code = "BK-" + Math.floor(1000 + Math.random() * 9000);
-    const subtotal = daily * days;
-    const tax = Math.round(subtotal * 0.18);
-    const total = subtotal + tax;
+    const enteredAmount = parseFloat(offlineForm.amount) || (daily * days);
 
     const { data: savedBooking, error: bookErr } = await supabase.from('bookings').insert({
       booking_code: code,
@@ -2737,34 +2869,33 @@ function AdminBookings() {
       to_date,
       days,
       daily_rate: daily,
-      subtotal,
-      tax,
+      subtotal: enteredAmount,
+      tax: 0,
       deposit: 0,
-      total,
+      total: enteredAmount,
       status,
       source: 'offline',
-      payment_status: 'pending',
+      payment_status: status === 'completed' ? 'paid' : 'pending',
     }).select('id').single();
 
     if (bookErr) { setOfflineError("Failed to save: " + bookErr.message); setOfflineSaving(false); return; }
 
-    // Auto-generate invoice
-    const cgst = Math.round(subtotal * 0.09);
-    const sgst = Math.round(subtotal * 0.09);
-    await supabase.from('invoices').insert({
+    // Auto-generate invoice with the exact amount entered
+    const { error: invErr } = await supabase.from('invoices').insert({
       invoice_number: "INV-" + code.slice(3),
       booking_id: savedBooking.id,
       customer_id: customerId,
-      amount: subtotal,
-      cgst,
-      sgst,
-      total: subtotal + cgst + sgst,
-      status: 'pending',
+      amount: enteredAmount,
+      cgst: 0,
+      sgst: 0,
+      total: enteredAmount,
+      status: status === 'completed' ? 'paid' : 'pending',
     });
+    if (invErr) { setOfflineError("Booking saved but invoice failed: " + invErr.message); setOfflineSaving(false); return; }
 
     setOfflineSaving(false);
     setShowOffline(false);
-    setOfflineForm({ car_id: "", customer_name: "", customer_phone: "", from_date: "", to_date: "", status: "upcoming" });
+    setOfflineForm({ car_id: "", customer_name: "", customer_phone: "", from_date: "", to_date: "", status: "upcoming", amount: "" });
     setOfflineError("");
     loadBookings();
   }
@@ -2851,8 +2982,28 @@ function AdminBookings() {
                 <div className="text-[#9e8e7e]">→ {b.to_date}</div>
               </div>
               <div className="col-span-1 text-[#1a120c] font-mono text-xs">{formatINR(b.total)}</div>
-              <div className="col-span-2 flex items-center justify-end gap-2">
-                {b.status === 'enquiry' ? (
+              <div className="col-span-2 flex items-center justify-end gap-1.5 flex-wrap">
+                {deletingBookingId === b.id ? (
+                  <div className="flex items-center gap-1 mr-1">
+                    <span className="text-[10px] text-[#5a4838]">Delete?</span>
+                    <button onClick={() => deleteBooking(b.id)}
+                      className="px-2 py-1 bg-red-500 text-white rounded-full text-[10px] font-medium">Yes</button>
+                    <button onClick={() => setDeletingBookingId(null)}
+                      className="px-2 py-1 border border-[#bfaf9a] text-[#5a4838] rounded-full text-[10px]">No</button>
+                  </div>
+                ) : (
+                  <>
+                    <button onClick={() => setEditingBooking(b)} title="Edit booking"
+                      className="w-7 h-7 rounded-lg border border-[#bfaf9a] hover:border-[#c74132]/50 flex items-center justify-center transition-colors flex-shrink-0">
+                      <Edit3 className="w-3 h-3 text-[#5a4838]" />
+                    </button>
+                    <button onClick={() => setDeletingBookingId(b.id)} title="Delete booking"
+                      className="w-7 h-7 rounded-lg border border-[#bfaf9a] hover:border-red-400/60 flex items-center justify-center transition-colors flex-shrink-0">
+                      <Trash2 className="w-3 h-3 text-[#5a4838]" />
+                    </button>
+                  </>
+                )}
+                {deletingBookingId !== b.id && (b.status === 'enquiry' ? (
                   <div className="flex items-center gap-1.5">
                     {confirmingId === b.id ? (
                       <>
@@ -2902,12 +3053,23 @@ function AdminBookings() {
                       <span className="text-[10px] text-emerald-600 font-mono font-medium">{formatINR(b.actual_amount_paid)}</span>
                     )}
                   </div>
-                )}
+                ))}
               </div>
             </motion.div>
           ))}
         </div>
       )}
+
+      {/* Booking edit modal */}
+      <AnimatePresence>
+        {editingBooking && (
+          <BookingEditModal
+            booking={editingBooking}
+            onClose={() => setEditingBooking(null)}
+            onSaved={() => { setEditingBooking(null); loadBookings(); }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* WhatsApp CTA toast */}
       <AnimatePresence>
@@ -3016,6 +3178,14 @@ function AdminBookings() {
                   </div>
                 </div>
                 <div>
+                  <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">Total amount (₹) <span className="text-[#9e8e7e] normal-case tracking-normal">— what you charged</span></label>
+                  <input required type="number" value={offlineForm.amount}
+                    onChange={e => setOfflineForm({ ...offlineForm, amount: e.target.value })}
+                    placeholder="e.g. 6600"
+                    className="w-full mt-1.5 bg-[#ede3d5] border border-[#bfaf9a] rounded-lg px-4 py-2.5 text-[#1a120c] placeholder-[#9e8e7e] outline-none focus:border-[#c74132]/60 text-lg font-mono" />
+                  <div className="text-[10px] text-[#9e8e7e] mt-1">Auto-filled from car rate × days. Edit if you charged differently.</div>
+                </div>
+                <div>
                   <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">Status</label>
                   <select value={offlineForm.status} onChange={e => setOfflineForm({ ...offlineForm, status: e.target.value })}
                     className="w-full mt-1.5 bg-[#ede3d5] border border-[#bfaf9a] rounded-lg px-4 py-2.5 text-[#1a120c]">
@@ -3064,11 +3234,12 @@ function AdminInvoices() {
         bookings ( booking_code, from_date, to_date, days, cars ( brand, model ) )
       `)
       .order('created_at', { ascending: false });
-    if (!error) {
-      const rows = data || [];
-      setInvoices(rows);
-      if (rows.length > 0) setSelected(rows[0]);
+    if (error) {
+      console.error('Invoices load error:', error.message);
     }
+    const rows = data || [];
+    setInvoices(rows);
+    if (rows.length > 0) setSelected(rows[0]);
     setLoading(false);
   }
 
