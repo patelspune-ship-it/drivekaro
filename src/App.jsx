@@ -297,16 +297,92 @@ function Nav({ view, setView, ownerSession, customerProfile, onScrollTo, onCusto
 }
 
 /* ========================== PAGE MODAL (About / Terms / Privacy) ========================== */
+const PAGE_DEFAULTS = {
+  about: {
+    title: 'About DriveKaro',
+    content: `DriveKaro is a self-drive car rental service based in Pune, Maharashtra, India. Founded in 2024, we give people the freedom to drive on their own schedule — no driver, no compromise.
+
+Our Fleet
+We maintain a curated fleet of well-serviced vehicles ranging from compact hatchbacks to powerful SUVs. Every car is thoroughly cleaned, sanitised, and inspected before each rental.
+
+Why DriveKaro?
+• No driver required — you are in full control
+• Transparent pricing with no hidden charges
+• 24/7 availability and roadside support
+• Home delivery and pickup across Pune
+
+Our Location
+Kool Homes Solitaire, Kausar Baugh, Kondhwa, Pune 411048
+Phone: +91 76663 98984
+Email: hi@drivekaro.in`,
+  },
+  terms: {
+    title: 'Terms & Conditions',
+    content: `Last updated: May 2026
+
+1. ELIGIBILITY
+Valid Indian driving licence required. Minimum age 21 years.
+
+2. BOOKING & CONFIRMATION
+Bookings are confirmed only after a call or message from our team.
+
+3. RENTAL PERIOD
+Midnight to midnight. A booking for May 9 to May 10 means the vehicle must be returned by 12:00 AM on May 10. Late returns are charged as an extra day.
+
+4. SECURITY DEPOSIT
+A refundable deposit is collected at handover and returned within 24 hours of a clean return.
+
+5. FUEL POLICY
+Vehicles are handed over with a marked fuel level and must be returned at the same level.
+
+6. DAMAGE & LIABILITY
+The renter is responsible for any damage during the rental period.
+
+7. CANCELLATION
+Full deposit refund for cancellations made 24+ hours before pickup.
+
+8. PROHIBITED USE
+No illegal use, racing, or sub-letting to third parties.
+
+9. JURISDICTION
+Laws of Maharashtra, India. Disputes subject to courts in Pune.`,
+  },
+  privacy: {
+    title: 'Privacy Policy',
+    content: `Last updated: May 2026
+
+1. INFORMATION WE COLLECT
+We collect your name, mobile number, email address, and booking details when you enquire or book through our platform.
+
+2. HOW WE USE YOUR INFORMATION
+Used solely to process your booking and contact you about your rental. Not shared with third parties.
+
+3. DATA STORAGE
+Stored securely. Booking records retained for accounting and legal purposes.
+
+4. COMMUNICATIONS
+By sharing your number, you consent to calls or WhatsApp messages from DriveKaro.
+
+5. YOUR RIGHTS
+Request data deletion at any time: hi@drivekaro.in
+
+6. COOKIES
+Minimal functional cookies only. No tracking or advertising cookies.
+
+7. CONTACT
+hi@drivekaro.in | +91 76663 98984`,
+  },
+};
+
 function PageModal({ slug, onClose }) {
-  const [page, setPage] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(PAGE_DEFAULTS[slug] || null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase.from('site_pages').select('title, content').eq('slug', slug).single()
-      .then(({ data, error }) => {
-        if (error) console.error('PageModal fetch error:', slug, error.message);
-        setPage(data || null);
-        setLoading(false);
+    // Try to load from Supabase (admin edits override defaults)
+    supabase.from('site_pages').select('title, content').eq('slug', slug).maybeSingle()
+      .then(({ data }) => {
+        if (data?.content) setPage(data);
       });
   }, [slug]);
 
@@ -324,15 +400,9 @@ function PageModal({ slug, onClose }) {
           </button>
         </div>
         <div className="px-8 py-6">
-          {loading ? (
-            <div className="space-y-3">
-              {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-4 rounded" style={{ width: `${70 + (i % 3) * 10}%` }} />)}
-            </div>
-          ) : (
-            <div className="text-sm text-[#3d2e1e] leading-relaxed whitespace-pre-line">
-              {page?.content}
-            </div>
-          )}
+          <div className="text-sm text-[#3d2e1e] leading-relaxed whitespace-pre-line">
+            {page?.content || ''}
+          </div>
         </div>
       </motion.div>
     </motion.div>
