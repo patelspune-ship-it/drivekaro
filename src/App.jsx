@@ -296,11 +296,55 @@ function Nav({ view, setView, ownerSession, customerProfile, onScrollTo, onCusto
   );
 }
 
+/* ========================== PAGE MODAL (About / Terms / Privacy) ========================== */
+function PageModal({ slug, onClose }) {
+  const [page, setPage] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.from('site_pages').select('title, content').eq('slug', slug).single()
+      .then(({ data, error }) => {
+        if (error) console.error('PageModal fetch error:', slug, error.message);
+        setPage(data || null);
+        setLoading(false);
+      });
+  }, [slug]);
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto">
+      <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 20, opacity: 0 }}
+        onClick={e => e.stopPropagation()}
+        className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl max-w-2xl w-full my-8">
+        <div className="flex items-center justify-between px-8 py-6 border-b border-[#d6c8b2] sticky top-0 bg-[#fffaf4] rounded-t-2xl">
+          <h2 className="text-2xl font-serif italic text-[#1a120c]">{loading ? '…' : page?.title}</h2>
+          <button onClick={onClose} className="w-9 h-9 rounded-full border border-[#d6c8b2] flex items-center justify-center">
+            <X className="w-4 h-4 text-[#7a6858]" />
+          </button>
+        </div>
+        <div className="px-8 py-6">
+          {loading ? (
+            <div className="space-y-3">
+              {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-4 rounded" style={{ width: `${70 + (i % 3) * 10}%` }} />)}
+            </div>
+          ) : (
+            <div className="text-sm text-[#3d2e1e] leading-relaxed whitespace-pre-line">
+              {page?.content}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 /* ========================== LANDING PAGE ========================== */
 function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom, setSearchTo }) {
   const [pickup, setPickup] = useState("Pune Hub (NIBM Road)");
   const [openFaq, setOpenFaq] = useState(null);
   const [featuredCars, setFeaturedCars] = useState([]);
+  const [showPage, setShowPage] = useState(null); // 'about' | 'terms' | 'privacy'
 
   useEffect(() => {
     const gradients = [
@@ -840,10 +884,17 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
             <div>
               <div className="text-xs uppercase tracking-[0.2em] text-[#9e8e7e] mb-4">Company</div>
               <div className="text-sm text-[#3d2e1e] space-y-2">
-                <div>About</div>
-                <div>Terms</div>
-                <div>Privacy</div>
-                <div>FAQs</div>
+                {[
+                  { label: 'About', action: () => setShowPage('about') },
+                  { label: 'Terms', action: () => setShowPage('terms') },
+                  { label: 'Privacy', action: () => setShowPage('privacy') },
+                  { label: 'FAQs', action: () => document.getElementById('faq')?.scrollIntoView({ behavior: 'smooth' }) },
+                ].map(({ label, action }) => (
+                  <button key={label} onClick={action}
+                    className="block hover:text-[#c74132] transition-colors">
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -858,6 +909,10 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
           </div>
         </div>
       </footer>
+
+      <AnimatePresence>
+        {showPage && <PageModal slug={showPage} onClose={() => setShowPage(null)} />}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -1848,6 +1903,7 @@ function AdminDashboard({ setView, onLogout, ownerEmail }) {
     { id: "invoices", label: "Invoices", icon: Receipt },
     { id: "customers", label: "Customers", icon: Users },
     { id: "maintenance", label: "Service", icon: Wrench },
+    { id: "pages", label: "Pages", icon: FileText },
   ];
 
   return (
@@ -1900,6 +1956,7 @@ function AdminDashboard({ setView, onLogout, ownerEmail }) {
             {section === "invoices" && <AdminInvoices key="iv" />}
             {section === "customers" && <AdminCustomers key="cu" />}
             {section === "maintenance" && <AdminMaintenance key="mt" />}
+            {section === "pages" && <AdminPages key="pg" />}
           </AnimatePresence>
         </div>
       </div>
@@ -3621,6 +3678,95 @@ function CarCalendarModal({ car, onClose }) {
           </motion.div>
         )}
       </AnimatePresence>
+    </motion.div>
+  );
+}
+
+/* ========================== ADMIN PAGES ========================== */
+function AdminPages() {
+  const slugs = [
+    { slug: 'about', label: 'About DriveKaro' },
+    { slug: 'terms', label: 'Terms & Conditions' },
+    { slug: 'privacy', label: 'Privacy Policy' },
+  ];
+  const [pages, setPages] = useState({});
+  const [saving, setSaving] = useState({});
+  const [saved, setSaved] = useState({});
+  const [saveError, setSaveError] = useState({});
+
+  useEffect(() => {
+    supabase.from('site_pages').select('slug, title, content')
+      .then(({ data, error }) => {
+        if (error) { console.error('site_pages load error:', error.message); return; }
+        const map = {};
+        (data || []).forEach(p => { map[p.slug] = { title: p.title, content: p.content }; });
+        setPages(map);
+      });
+  }, []);
+
+  async function savePage(slug) {
+    setSaving(s => ({ ...s, [slug]: true }));
+    setSaveError(e => ({ ...e, [slug]: '' }));
+
+    const { error } = await supabase.from('site_pages')
+      .update({
+        title: pages[slug]?.title || slug,
+        content: pages[slug]?.content || '',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('slug', slug);
+
+    setSaving(s => ({ ...s, [slug]: false }));
+    if (error) {
+      setSaveError(e => ({ ...e, [slug]: error.message }));
+      return;
+    }
+    setSaved(s => ({ ...s, [slug]: true }));
+    setTimeout(() => setSaved(s => ({ ...s, [slug]: false })), 2500);
+  }
+
+  return (
+    <motion.div {...fadeUp}>
+      <div className="mb-8">
+        <div className="text-xs uppercase tracking-wider text-[#7a6858]">Footer pages · visible to customers</div>
+        <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Pages</h1>
+      </div>
+
+      <div className="space-y-6">
+        {slugs.map(({ slug, label }) => (
+          <div key={slug} className="border border-[#d6c8b2] rounded-2xl bg-[#fffaf4] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#d6c8b2] bg-[#f4e8d0]">
+              <div>
+                <div className="text-xs uppercase tracking-wider text-[#7a6858]">Footer → {label}</div>
+                <input
+                  value={pages[slug]?.title || ''}
+                  onChange={e => setPages(p => ({ ...p, [slug]: { ...p[slug], title: e.target.value } }))}
+                  className="text-lg font-serif italic text-[#1a120c] bg-transparent outline-none border-b border-transparent focus:border-[#c74132] mt-0.5"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                {saveError[slug] && (
+                  <span className="text-xs text-red-600 max-w-xs">{saveError[slug]}</span>
+                )}
+                <button onClick={() => savePage(slug)} disabled={saving[slug]}
+                  className={`px-5 py-2 rounded-full text-xs uppercase tracking-wider transition-colors flex-shrink-0 ${saved[slug] ? 'bg-emerald-500 text-white' : 'bg-[#c74132] hover:bg-[#a33628] text-[#1a120c]'} disabled:opacity-50`}>
+                  {saving[slug] ? 'Saving…' : saved[slug] ? '✓ Saved' : 'Save'}
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              <textarea
+                value={pages[slug]?.content || ''}
+                onChange={e => setPages(p => ({ ...p, [slug]: { ...p[slug], content: e.target.value } }))}
+                rows={12}
+                className="w-full bg-[#fffaf4] text-sm text-[#3d2e1e] leading-relaxed outline-none resize-y font-mono placeholder-[#9e8e7e]"
+                placeholder={`Enter ${label} content here…`}
+              />
+              <div className="text-[10px] text-[#9e8e7e] mt-2">Plain text. Use blank lines to separate paragraphs. Changes are visible to customers immediately after saving.</div>
+            </div>
+          </div>
+        ))}
+      </div>
     </motion.div>
   );
 }
