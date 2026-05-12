@@ -4719,7 +4719,7 @@ export default function App() {
   const sharedProps = { setView, searchFrom, searchTo, setSearchFrom, setSearchTo };
 
   return (
-    <div className="min-h-screen bg-[#f4e8d0] text-[#1a120c]" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
+    <div className="min-h-screen bg-[#f4e8d0] text-[#1a120c]" style={{ fontFamily: "'Satoshi', ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`
         body { background: #f4e8d0; }
         .font-serif { font-family: 'Cormorant Garamond', 'Times New Roman', Georgia, serif; font-weight: 500; letter-spacing: -0.02em; }
