@@ -220,7 +220,7 @@ function CarVisual({ car, large = false }) {
       <div className="absolute top-4 left-5 text-[10px] uppercase tracking-[0.2em] text-white/60 font-medium">{car.brand}</div>
       <div className="absolute top-4 right-5"><StatusDot status={car.status} /></div>
       <div className="absolute bottom-4 left-5 right-5">
-        <div className={`text-white font-serif italic ${large ? "text-4xl" : "text-2xl"} leading-none tracking-tight`}>{car.model}</div>
+        <div className={`text-white font-serif ${large ? "text-4xl" : "text-2xl"} leading-none tracking-tight`}>{car.model}</div>
         <div className="text-[10px] uppercase tracking-[0.2em] text-white/40 mt-1">{car.category} · {car.year}</div>
       </div>
       <div className="absolute bottom-4 right-5 px-2 py-1 bg-black/40 border border-white/10 rounded text-[9px] font-mono text-white/60">{car.plate}</div>
@@ -296,6 +296,106 @@ function Nav({ ownerSession, customerProfile, onScrollTo, onCustomerSignIn, onCu
         </div>
       </div>
     </header>
+  );
+}
+
+/* ========================== REVIEWS CAROUSEL ========================== */
+const REVIEWS = [
+  {
+    initials: 'MS', gradient: 'from-blue-500 to-indigo-500',
+    name: 'Mahesh Singh', meta: 'Local Guide · 14 reviews · 3 photos', time: '8 weeks ago',
+    text: 'I found Drive Karo via Google — and had the smoothest experience renting from them! Amaan was very courteous, helpful and prompt in handling all my queries about the rental. He delivered the car at home and picked it up as well. The car itself was quite good and served our purpose very well — we drove from Pune to Navsari, to Mumbai and back to Pune — and I enjoyed driving it. I will recommend Drive Karo for anyone looking to rent a self-drive car in Pune 👍🏼',
+  },
+  {
+    initials: 'RA', gradient: 'from-emerald-500 to-teal-600',
+    name: 'Riyaz Ali Munsoori', meta: '11 reviews · 2 photos', time: '24 weeks ago',
+    text: 'Great experience. Cars are well maintained and host is super understanding and friendly. Better rates than Zoomcar for less than 7 days drive. I have already used their car for 3 different trips and all went smooth.',
+  },
+  // ➕ To add more reviews, copy one block above, paste here, and fill in the details
+];
+
+const GoogleG = () => (
+  <svg viewBox="0 0 24 24" className="w-5 h-5 flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
+    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+  </svg>
+);
+
+function ReviewCarousel() {
+  const [idx, setIdx] = useState(0);
+  const [dir, setDir] = useState(1);
+  const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    if (paused || REVIEWS.length < 2) return;
+    const t = setInterval(() => {
+      setDir(1);
+      setIdx(i => (i + 1) % REVIEWS.length);
+    }, 5000);
+    return () => clearInterval(t);
+  }, [paused]);
+
+  function go(newIdx) { setDir(newIdx > idx ? 1 : -1); setIdx(newIdx); }
+  function prev() { go((idx - 1 + REVIEWS.length) % REVIEWS.length); }
+  function next() { go((idx + 1) % REVIEWS.length); }
+
+  const r = REVIEWS[idx];
+
+  return (
+    <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+      <div className="relative overflow-hidden">
+        <AnimatePresence mode="wait" custom={dir}>
+          <motion.div key={idx}
+            custom={dir}
+            initial={{ opacity: 0, x: dir * 60 }}
+            animate={{ opacity: 1, x: 0, transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] } }}
+            exit={{ opacity: 0, x: dir * -60, transition: { duration: 0.25 } }}
+            className="border border-[#d6c8b2] rounded-2xl p-8 bg-[#fffaf4]">
+            <div className="flex items-start justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <div className={`w-12 h-12 rounded-full bg-gradient-to-br ${r.gradient} flex items-center justify-center text-white text-sm font-semibold flex-shrink-0`}>
+                  {r.initials}
+                </div>
+                <div>
+                  <div className="text-[#1a120c] font-semibold">{r.name}</div>
+                  <div className="text-xs text-[#7a6858] mt-0.5">{r.meta}</div>
+                </div>
+              </div>
+              <GoogleG />
+            </div>
+            <div className="flex items-center gap-2 mb-5">
+              {[...Array(5)].map((_, i) => <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />)}
+              <span className="text-xs text-[#9e8e7e] ml-1">{r.time}</span>
+            </div>
+            <p className="text-base text-[#3d2e1e] leading-relaxed">{r.text}</p>
+          </motion.div>
+        </AnimatePresence>
+      </div>
+
+      {REVIEWS.length > 1 && (
+        <div className="flex items-center justify-between mt-6">
+          <div className="flex gap-2">
+            <button onClick={prev}
+              className="w-10 h-10 rounded-full border border-[#d6c8b2] flex items-center justify-center hover:border-[#c74132] hover:text-[#c74132] transition-colors text-lg text-[#5a4838]">
+              ‹
+            </button>
+            <button onClick={next}
+              className="w-10 h-10 rounded-full border border-[#d6c8b2] flex items-center justify-center hover:border-[#c74132] hover:text-[#c74132] transition-colors text-lg text-[#5a4838]">
+              ›
+            </button>
+          </div>
+          <div className="flex gap-2 items-center">
+            {REVIEWS.map((_, i) => (
+              <button key={i} onClick={() => go(i)}
+                className={`rounded-full transition-all duration-300 ${i === idx ? 'w-6 h-2 bg-[#c74132]' : 'w-2 h-2 bg-[#d6c8b2] hover:bg-[#bfaf9a]'}`} />
+            ))}
+          </div>
+          <span className="text-xs text-[#9e8e7e] font-mono">{idx + 1} / {REVIEWS.length}</span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -397,7 +497,7 @@ function PageModal({ slug, onClose }) {
         onClick={e => e.stopPropagation()}
         className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl max-w-2xl w-full my-8">
         <div className="flex items-center justify-between px-8 py-6 border-b border-[#d6c8b2] sticky top-0 bg-[#fffaf4] rounded-t-2xl">
-          <h2 className="text-2xl font-serif italic text-[#1a120c]">{loading ? '…' : page?.title}</h2>
+          <h2 className="text-2xl font-serif text-[#1a120c]">{loading ? '…' : page?.title}</h2>
           <button onClick={onClose} className="w-9 h-9 rounded-full border border-[#d6c8b2] flex items-center justify-center">
             <X className="w-4 h-4 text-[#7a6858]" />
           </button>
@@ -476,7 +576,7 @@ function Landing({ goToBooking, searchFrom, searchTo, setSearchFrom, setSearchTo
 
           {/* Headline */}
           <div className="grid lg:grid-cols-12 gap-8 items-end">
-            <motion.h1 {...stagger(0.1)} className="lg:col-span-9 text-[12vw] lg:text-[8.5rem] leading-[0.85] tracking-tight font-serif text-[#1a120c]">
+            <motion.h1 {...stagger(0.1)} className="lg:col-span-9 text-[12vw] lg:text-[8.5rem] leading-[0.85] tracking-tight font-display text-[#1a120c]">
               Keys in hand.
               <br />
               <span className="italic text-[#d4483b]">Open road</span>
@@ -566,7 +666,7 @@ function Landing({ goToBooking, searchFrom, searchTo, setSearchFrom, setSearchTo
             initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}>
             <div className="text-xs uppercase tracking-[0.3em] text-[#d4483b] mb-3">— The Fleet</div>
-            <h2 className="text-5xl md:text-6xl font-serif italic text-[#1a120c] leading-none">
+            <h2 className="text-5xl md:text-6xl font-serif text-[#1a120c] leading-none">
               Built for <span className="not-italic text-[#9e8e7e]">every</span> mile.
             </h2>
             <motion.div className="h-px bg-[#c74132] mt-4 origin-left"
@@ -630,7 +730,7 @@ function Landing({ goToBooking, searchFrom, searchTo, setSearchFrom, setSearchTo
             initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}>
             <div className="text-xs uppercase tracking-[0.3em] text-[#d4483b] mb-3">— Process</div>
-            <h2 className="text-5xl md:text-6xl font-serif italic text-[#1a120c] leading-none mb-4">
+            <h2 className="text-5xl md:text-6xl font-serif text-[#1a120c] leading-none mb-4">
               Four steps. <span className="not-italic text-[#9e8e7e]">Then drive.</span>
             </h2>
             <motion.div className="h-px bg-[#c74132] mb-12 origin-left"
@@ -670,7 +770,7 @@ function Landing({ goToBooking, searchFrom, searchTo, setSearchFrom, setSearchTo
             initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}>
             <div className="text-xs uppercase tracking-[0.3em] text-[#d4483b] mb-3">— Google reviews</div>
-            <h2 className="text-5xl md:text-6xl font-serif italic text-[#1a120c] leading-none">
+            <h2 className="text-5xl md:text-6xl font-serif text-[#1a120c] leading-none">
               What customers say.
             </h2>
             <motion.div className="h-px bg-[#c74132] mt-4 origin-left"
@@ -678,79 +778,12 @@ function Landing({ goToBooking, searchFrom, searchTo, setSearchFrom, setSearchTo
               viewport={{ once: true }} transition={{ duration: 0.6, delay: 0.35, ease: [0.22, 1, 0.36, 1] }} />
           </motion.div>
           <div className="flex items-center gap-3 px-5 py-3 border border-[#d6c8b2] rounded-full bg-[#fffaf4]">
-            <div className="flex">
-              {[...Array(5)].map((_, i) => (
-                <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-              ))}
-            </div>
+            <div className="flex">{[...Array(5)].map((_, i) => <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />)}</div>
             <span className="text-[#1a120c] font-medium">4.9</span>
             <span className="text-[#9e8e7e] text-sm">· 37 reviews on Google</span>
           </div>
         </div>
-
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Review 1 — Mahesh Singh */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }} transition={{ duration: 0.6 }}
-            className="border border-[#d6c8b2] rounded-2xl p-7 bg-[#fffaf4] flex flex-col">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
-                  MS
-                </div>
-                <div>
-                  <div className="text-[#1a120c] font-medium">Mahesh Singh</div>
-                  <div className="text-xs text-[#7a6858]">Local Guide · 14 reviews · 3 photos</div>
-                </div>
-              </div>
-              <svg viewBox="0 0 24 24" className="w-5 h-5 flex-shrink-0 mt-0.5" xmlns="http://www.w3.org/2000/svg">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-              </svg>
-            </div>
-            <div className="flex items-center gap-2 mb-4">
-              {[...Array(5)].map((_, i) => <Star key={i} className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />)}
-              <span className="text-xs text-[#9e8e7e] ml-1">8 weeks ago</span>
-            </div>
-            <p className="text-sm text-[#3d2e1e] leading-relaxed flex-1">
-              I found Drive Karo via Google — and had the smoothest experience renting from them! Amaan was very courteous, helpful and prompt in handling all my queries about the rental. He delivered the car at home and picked it up as well. The car itself was quite good and served our purpose very well — we drove from Pune to Navsari, to Mumbai and back to Pune — and I enjoyed driving it. I will recommend Drive Karo for anyone looking to rent a self-drive car in Pune 👍🏼
-            </p>
-          </motion.div>
-
-          {/* Review 2 — Riyaz Ali Munsoori */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }} transition={{ duration: 0.6, delay: 0.1 }}
-            className="border border-[#d6c8b2] rounded-2xl p-7 bg-[#fffaf4] flex flex-col">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
-                  RA
-                </div>
-                <div>
-                  <div className="text-[#1a120c] font-medium">Riyaz Ali Munsoori</div>
-                  <div className="text-xs text-[#7a6858]">11 reviews · 2 photos</div>
-                </div>
-              </div>
-              <svg viewBox="0 0 24 24" className="w-5 h-5 flex-shrink-0 mt-0.5" xmlns="http://www.w3.org/2000/svg">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-              </svg>
-            </div>
-            <div className="flex items-center gap-2 mb-4">
-              {[...Array(5)].map((_, i) => <Star key={i} className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />)}
-              <span className="text-xs text-[#9e8e7e] ml-1">24 weeks ago</span>
-            </div>
-            <p className="text-sm text-[#3d2e1e] leading-relaxed flex-1">
-              Great experience. Cars are well maintained and host is super understanding and friendly. Better rates than Zoomcar for less than 7 days drive. I have already used their car for 3 different trips and all went smooth.
-            </p>
-          </motion.div>
-        </div>
+        <ReviewCarousel />
 
         {/* Feature strips */}
         <div className="grid md:grid-cols-3 gap-4 mt-8">
@@ -781,7 +814,7 @@ function Landing({ goToBooking, searchFrom, searchTo, setSearchFrom, setSearchTo
           <div className="grid lg:grid-cols-12 gap-16 items-start">
             <div className="lg:col-span-4">
               <div className="text-xs uppercase tracking-[0.3em] text-[#d4483b] mb-3">— FAQ</div>
-              <h2 className="text-5xl font-serif italic text-[#1a120c] leading-none mb-6">
+              <h2 className="text-5xl font-serif text-[#1a120c] leading-none mb-6">
                 Common questions.
               </h2>
               <p className="text-sm text-[#7a6858] leading-relaxed mb-8">
@@ -862,7 +895,7 @@ function Landing({ goToBooking, searchFrom, searchTo, setSearchFrom, setSearchTo
       {/* CONTACT US */}
       <section id="contact" className="relative max-w-[1400px] mx-auto px-6 lg:px-10 py-24">
         <div className="text-xs uppercase tracking-[0.3em] text-[#d4483b] mb-3">— Contact us</div>
-        <h2 className="text-5xl md:text-6xl font-serif italic text-[#1a120c] leading-none mb-16">
+        <h2 className="text-5xl md:text-6xl font-serif text-[#1a120c] leading-none mb-16">
           Let's talk.
         </h2>
 
@@ -910,7 +943,7 @@ function Landing({ goToBooking, searchFrom, searchTo, setSearchFrom, setSearchTo
             <div className="border border-[#d6c8b2] rounded-2xl p-8 bg-[#fffaf4]">
               <MapPin className="w-5 h-5 text-[#c74132] mb-4" />
               <div className="text-xs uppercase tracking-wider text-[#7a6858] mb-2">Find us</div>
-              <div className="text-[#1a120c] text-lg font-serif italic leading-snug mb-1">
+              <div className="text-[#1a120c] text-lg font-serif leading-snug mb-1">
                 Kool Homes Solitaire
               </div>
               <div className="text-sm text-[#5a4838] leading-relaxed mb-6">
@@ -1115,7 +1148,7 @@ function FleetPage({ setView, goToBooking, searchFrom, searchTo, setSearchFrom, 
       <div className="flex items-end justify-between flex-wrap gap-6 mb-8">
         <div>
           <div className="text-xs uppercase tracking-[0.3em] text-[#d4483b] mb-3">— The Fleet</div>
-          <h1 className="text-6xl md:text-7xl font-serif italic text-[#1a120c] leading-none">
+          <h1 className="text-6xl md:text-7xl font-serif text-[#1a120c] leading-none">
             All cars. <span className="not-italic text-[#9e8e7e]">One garage.</span>
           </h1>
         </div>
@@ -1210,7 +1243,7 @@ function FleetPage({ setView, goToBooking, searchFrom, searchTo, setSearchFrom, 
                   <div className="flex items-start justify-between mb-3">
                     <div>
                       <div className="text-xs text-[#7a6858] uppercase tracking-wider">{car.brand}</div>
-                      <div className="text-lg text-[#1a120c] font-medium">{car.model}</div>
+                      <div className="text-lg text-[#1a120c] font-bold">{car.model}</div>
                     </div>
                     <div className="flex items-center gap-1 text-xs text-[#5a4838]">
                       <Star className="w-3 h-3 fill-[#d4483b] text-[#d4483b]" />{car.rating}
@@ -1319,7 +1352,7 @@ function BookingPage({ setView, searchFrom, searchTo }) {
             <div className="mt-6 flex items-start justify-between">
               <div>
                 <div className="text-xs uppercase tracking-wider text-[#7a6858]">{car.brand}</div>
-                <h1 className="text-5xl font-serif italic text-[#1a120c]">{car.model}</h1>
+                <h1 className="text-5xl font-serif text-[#1a120c]">{car.model}</h1>
                 {car.rating && (
                   <div className="flex items-center gap-1 mt-2 text-sm text-[#5a4838]">
                     <Star className="w-4 h-4 fill-[#d4483b] text-[#d4483b]" />{car.rating} · {car.trips} trips
@@ -1339,7 +1372,7 @@ function BookingPage({ setView, searchFrom, searchTo }) {
                   <div key={i} className="border border-[#d6c8b2] rounded-xl p-4">
                     <Icon className="w-4 h-4 text-[#d4483b] mb-3" />
                     <div className="text-[10px] uppercase tracking-wider text-[#7a6858]">{s.l}</div>
-                    <div className="text-[#1a120c] mt-1 break-words">{s.v}</div>
+                    <div className="text-[#1a120c] mt-1 break-words font-semibold">{s.v}</div>
                   </div>
                 );
               })}
@@ -1361,7 +1394,7 @@ function BookingPage({ setView, searchFrom, searchTo }) {
           <div className="lg:col-span-5">
             <div className="sticky top-24 border-2 border-[#c74132]/30 rounded-2xl p-8 bg-[#fffaf4]">
               <div className="text-xs uppercase tracking-wider text-[#7a6858] mb-2">Interested in this car?</div>
-              <div className="text-2xl font-serif italic text-[#1a120c] mb-6">Call or WhatsApp to book</div>
+              <div className="text-2xl font-serif text-[#1a120c] mb-6">Call or WhatsApp to book</div>
               <a href="tel:+917666398984"
                 className="text-4xl font-serif text-[#c74132] hover:text-[#a33628] transition-colors block mb-1">
                 +91 76663 98984
@@ -1440,7 +1473,7 @@ function BookingPage({ setView, searchFrom, searchTo }) {
           </svg>
         </motion.div>
         <div className="text-xs uppercase tracking-[0.3em] text-[#d4483b] mb-3">Enquiry received</div>
-        <h1 className="text-4xl font-serif italic text-[#1a120c] mb-3">We've got your request!</h1>
+        <h1 className="text-4xl font-serif text-[#1a120c] mb-3">We've got your request!</h1>
         <p className="text-[#5a4838] mb-1">{car.brand} {car.model} · {days} day{days > 1 ? "s" : ""}</p>
         <p className="text-[#7a6858] mb-1">{fmtD(from)} → {fmtD(to)}</p>
         <p className="text-xs text-[#9e8e7e] mb-1">12:00 AM pick-up · Return by 12:00 AM on {fmtD(to)}</p>
@@ -1476,7 +1509,7 @@ function BookingPage({ setView, searchFrom, searchTo }) {
           <div className="mt-6 flex items-start justify-between">
             <div>
               <div className="text-xs uppercase tracking-wider text-[#7a6858]">{car.brand}</div>
-              <h1 className="text-5xl font-serif italic text-[#1a120c]">{car.model}</h1>
+              <h1 className="text-5xl font-serif text-[#1a120c]">{car.model}</h1>
               <div className="flex items-center gap-1 mt-2 text-sm text-[#5a4838]">
                 <Star className="w-4 h-4 fill-[#d4483b] text-[#d4483b]" />{car.rating} · {car.trips} trips
               </div>
@@ -1504,7 +1537,7 @@ function BookingPage({ setView, searchFrom, searchTo }) {
             <div className="text-xs uppercase tracking-wider text-[#7a6858] mb-4">What's included</div>
             <div className="grid grid-cols-2 gap-3">
               {["350 km per day included","Midnight to midnight billing","Sanitised before pickup","Fuel level marked at start"].map((f, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm text-[#3d2e1e]">
+                <div key={i} className="flex items-center gap-2 text-sm text-[#3d2e1e] font-medium">
                   <CheckCircle2 className="w-4 h-4 text-[#d4483b] flex-shrink-0" />{f}
                 </div>
               ))}
@@ -1644,7 +1677,7 @@ function PasswordResetModal({ onClose }) {
           </div>
         ) : (
           <>
-            <h2 className="text-2xl font-serif italic text-[#1a120c] mb-2">Set new password</h2>
+            <h2 className="text-2xl font-serif text-[#1a120c] mb-2">Set new password</h2>
             <p className="text-sm text-[#7a6858] mb-5">Choose a new password for your account.</p>
             <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">New password</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)}
@@ -1743,7 +1776,7 @@ function CustomerAuthModal({ onClose }) {
         className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl p-8 max-w-sm w-full">
 
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-serif italic text-[#1a120c]">My Trips</h2>
+          <h2 className="text-2xl font-serif text-[#1a120c]">My Trips</h2>
           <button onClick={onClose} className="w-9 h-9 rounded-full border border-[#d6c8b2] flex items-center justify-center">
             <X className="w-4 h-4 text-[#7a6858]" />
           </button>
@@ -1861,7 +1894,7 @@ function CustomerDashboard({ setView, goToBooking, customerProfile, customerSess
         <div className="w-20 h-20 rounded-full bg-[#ede3d5] mx-auto flex items-center justify-center mb-8">
           <Lock className="w-8 h-8 text-[#c74132]" />
         </div>
-        <h1 className="text-4xl font-serif italic text-[#1a120c] mb-3">My Trips</h1>
+        <h1 className="text-4xl font-serif text-[#1a120c] mb-3">My Trips</h1>
         <p className="text-[#7a6858] mb-8 text-sm">Sign in with your mobile number to see all your bookings and enquiries.</p>
         <button onClick={onSignIn} className="px-8 py-3 bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] rounded-full text-sm uppercase tracking-wider transition-colors">
           Sign in with OTP
@@ -1879,7 +1912,7 @@ function CustomerDashboard({ setView, goToBooking, customerProfile, customerSess
       <div className="flex items-end justify-between flex-wrap gap-4 mb-10">
         <div>
           <div className="text-xs uppercase tracking-[0.3em] text-[#d4483b] mb-3">— Your space</div>
-          <h1 className="text-5xl md:text-6xl font-serif italic text-[#1a120c] leading-none">
+          <h1 className="text-5xl md:text-6xl font-serif text-[#1a120c] leading-none">
             Hello, <span className="text-[#9e8e7e]">{firstName}.</span>
           </h1>
           <div className="text-sm text-[#7a6858] mt-2">{customerProfile?.phone}</div>
@@ -1914,7 +1947,7 @@ function CustomerDashboard({ setView, goToBooking, customerProfile, customerSess
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <div className="text-xs uppercase tracking-wider text-[#7a6858]">{active.cars?.brand}</div>
-              <div className="text-3xl font-serif italic text-[#1a120c]">{active.cars?.model}</div>
+              <div className="text-3xl font-serif text-[#1a120c]">{active.cars?.model}</div>
               <div className="text-sm text-[#5a4838] mt-2">{active.from_date} → {active.to_date} · {active.days} days</div>
             </div>
             <a href="tel:+917666398984" className="px-5 py-3 bg-[#c74132] text-[#1a120c] rounded-full text-xs uppercase tracking-wider inline-flex items-center gap-2">
@@ -1926,7 +1959,7 @@ function CustomerDashboard({ setView, goToBooking, customerProfile, customerSess
 
       <div>
         <div className="flex items-end justify-between mb-6">
-          <div className="text-2xl font-serif italic text-[#1a120c]">All bookings</div>
+          <div className="text-2xl font-serif text-[#1a120c]">All bookings</div>
           <div className="text-xs uppercase tracking-wider text-[#7a6858]">{bookings.length} total</div>
         </div>
 
@@ -2017,7 +2050,7 @@ function OwnerLoginScreen({ onSuccess }) {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <img src="/logo-transparent.png" alt="DriveKaro" className="h-12 w-auto mx-auto mb-6" />
-          <h1 className="font-serif italic text-3xl text-[#1a120c] leading-none">Owner Access</h1>
+          <h1 className="font-serif text-3xl text-[#1a120c] leading-none">Owner Access</h1>
           <p className="text-sm text-[#7a6858] mt-2">Sign in to manage your fleet</p>
         </div>
 
@@ -2228,7 +2261,7 @@ function AdminOverview() {
       <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
         <div>
           <div className="text-xs uppercase tracking-wider text-[#7a6858]">{new Date().toDateString()} · live data</div>
-          <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}.</h1>
+          <h1 className="text-4xl font-serif text-[#1a120c] mt-1">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}.</h1>
         </div>
         <div className="flex gap-2">
           <button className="px-4 py-2 border border-[#bfaf9a] text-[#3d2e1e] rounded-full text-xs uppercase tracking-wider inline-flex items-center gap-2 hover:border-[#c74132]/60">
@@ -2325,7 +2358,7 @@ function AdminOverview() {
 
       <div className="border border-[#d6c8b2] rounded-xl p-5 bg-[#fffaf4]/60">
         <div className="flex items-center justify-between mb-5">
-          <div className="text-2xl font-serif italic text-[#1a120c]">Recent bookings</div>
+          <div className="text-2xl font-serif text-[#1a120c]">Recent bookings</div>
           <span className="text-[10px] uppercase tracking-wider text-[#d4483b]">Live</span>
         </div>
         {recentBookings.length === 0 ? (
@@ -2447,7 +2480,7 @@ function CarEditModal({ car, onClose, onSaved }) {
         <div className="flex items-center justify-between px-8 pt-8 pb-6 border-b border-[#d6c8b2]">
           <div>
             <div className="text-xs uppercase tracking-wider text-[#7a6858]">Admin · Edit</div>
-            <h2 className="text-2xl font-serif italic text-[#1a120c] mt-0.5">{car.brand} {car.model}</h2>
+            <h2 className="text-2xl font-serif text-[#1a120c] mt-0.5">{car.brand} {car.model}</h2>
           </div>
           <button onClick={onClose} className="w-9 h-9 rounded-full border border-[#bfaf9a] flex items-center justify-center hover:border-[#c74132]/50 transition-colors">
             <X className="w-4 h-4 text-[#5a4838]" />
@@ -2654,7 +2687,7 @@ function AdminFleet() {
       <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
         <div>
           <div className="text-xs uppercase tracking-wider text-[#7a6858]">Manage your cars · live from database</div>
-          <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Fleet</h1>
+          <h1 className="text-4xl font-serif text-[#1a120c] mt-1">Fleet</h1>
         </div>
         <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-[#c74132] text-[#1a120c] rounded-full text-xs uppercase tracking-wider inline-flex items-center gap-2">
           <Plus className="w-3.5 h-3.5" /> Add a car
@@ -2752,7 +2785,7 @@ function AdminFleet() {
               onClick={e => e.stopPropagation()}
               className="bg-[#fffaf4] border border-[#bfaf9a] rounded-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-3xl font-serif italic text-[#1a120c]">Add a new car</h2>
+                <h2 className="text-3xl font-serif text-[#1a120c]">Add a new car</h2>
                 <button onClick={() => setShowAdd(false)} className="w-9 h-9 rounded-full border border-[#bfaf9a] flex items-center justify-center">
                   <X className="w-4 h-4 text-[#5a4838]" />
                 </button>
@@ -2864,7 +2897,7 @@ function BookingEditModal({ booking: b, onClose, onSaved }) {
         <div className="flex items-start justify-between mb-5">
           <div>
             <div className="text-xs uppercase tracking-wider text-[#7a6858]">Edit booking</div>
-            <div className="text-xl font-serif italic text-[#1a120c] mt-0.5">{b.customers?.full_name}</div>
+            <div className="text-xl font-serif text-[#1a120c] mt-0.5">{b.customers?.full_name}</div>
             <div className="text-xs font-mono text-[#9e8e7e]">{b.booking_code} · {b.cars?.model}</div>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-full border border-[#d6c8b2] flex items-center justify-center">
@@ -3158,7 +3191,7 @@ function AdminBookings() {
       <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
         <div>
           <div className="text-xs uppercase tracking-wider text-[#7a6858]">All trips · live from database</div>
-          <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Bookings</h1>
+          <h1 className="text-4xl font-serif text-[#1a120c] mt-1">Bookings</h1>
         </div>
         <div className="flex gap-2">
           <button onClick={loadBookings} className="px-4 py-2 border border-[#bfaf9a] text-[#3d2e1e] rounded-full text-xs uppercase tracking-wider hover:border-[#c74132]/60">
@@ -3350,7 +3383,7 @@ function AdminBookings() {
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
               onClick={e => e.stopPropagation()}
               className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl p-8 max-w-sm w-full">
-              <h2 className="text-2xl font-serif italic text-[#1a120c] mb-1">End trip</h2>
+              <h2 className="text-2xl font-serif text-[#1a120c] mb-1">End trip</h2>
               <p className="text-sm text-[#7a6858] mb-6">
                 {endingTrip.customers?.full_name} · {endingTrip.cars?.model}<br />
                 {endingTrip.from_date} → {endingTrip.to_date}
@@ -3390,7 +3423,7 @@ function AdminBookings() {
               onClick={e => e.stopPropagation()}
               className="bg-[#fffaf4] border border-[#bfaf9a] rounded-2xl p-8 max-w-lg w-full">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-serif italic text-[#1a120c]">Add offline booking</h2>
+                <h2 className="text-2xl font-serif text-[#1a120c]">Add offline booking</h2>
                 <button onClick={() => setShowOffline(false)} className="w-9 h-9 rounded-full border border-[#bfaf9a] flex items-center justify-center">
                   <X className="w-4 h-4 text-[#5a4838]" />
                 </button>
@@ -3579,7 +3612,7 @@ function AdminInvoices() {
       <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
         <div>
           <div className="text-xs uppercase tracking-wider text-[#7a6858]">GST-compliant invoicing · live</div>
-          <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Invoices</h1>
+          <h1 className="text-4xl font-serif text-[#1a120c] mt-1">Invoices</h1>
         </div>
         <button onClick={loadInvoices} className="px-4 py-2 border border-[#bfaf9a] text-[#3d2e1e] rounded-full text-xs uppercase tracking-wider hover:border-[#c74132]/60">
           Refresh
@@ -3765,7 +3798,7 @@ function AdminCustomers() {
       <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
         <div>
           <div className="text-xs uppercase tracking-wider text-[#7a6858]">CRM · live</div>
-          <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Customers</h1>
+          <h1 className="text-4xl font-serif text-[#1a120c] mt-1">Customers</h1>
         </div>
         <div className="relative">
           <Search className="w-4 h-4 text-[#7a6858] absolute left-3 top-1/2 -translate-y-1/2" />
@@ -3890,7 +3923,7 @@ function CarCalendarModal({ car, onClose }) {
         <div className="flex items-start justify-between mb-5">
           <div>
             <div className="text-xs uppercase tracking-wider text-[#7a6858]">Availability</div>
-            <div className="text-xl font-serif italic text-[#1a120c]">{car.brand} {car.model}</div>
+            <div className="text-xl font-serif text-[#1a120c]">{car.brand} {car.model}</div>
             <div className="text-[10px] font-mono text-[#9e8e7e]">{car.plate_number}</div>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-full border border-[#d6c8b2] flex items-center justify-center">
@@ -3960,7 +3993,7 @@ function CarCalendarModal({ car, onClose }) {
             className="fixed inset-0 z-60 flex items-center justify-center p-4">
             <div onClick={e => e.stopPropagation()} className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl p-6 max-w-xs w-full shadow-xl">
               <div className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full inline-block mb-3 ${cfg[selected.status]?.bg}`}>{selected.status}</div>
-              <div className="text-lg font-serif italic text-[#1a120c] mb-1">{selected.customers?.full_name || '—'}</div>
+              <div className="text-lg font-serif text-[#1a120c] mb-1">{selected.customers?.full_name || '—'}</div>
               <div className="text-sm text-[#7a6858] mb-3">{selected.customers?.phone}</div>
               <div className="grid grid-cols-2 gap-2 text-xs mb-3">
                 <div><div className="text-[#9e8e7e] mb-0.5">From</div><div className="font-mono text-[#1a120c]">{selected.from_date}</div></div>
@@ -4079,7 +4112,7 @@ function AdminReports() {
     <motion.div {...fadeUp}>
       <div className="mb-8">
         <div className="text-xs uppercase tracking-wider text-[#7a6858]">Export data</div>
-        <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Reports</h1>
+        <h1 className="text-4xl font-serif text-[#1a120c] mt-1">Reports</h1>
       </div>
 
       {/* Month selector */}
@@ -4104,7 +4137,7 @@ function AdminReports() {
           <div className="w-10 h-10 rounded-xl bg-[#c74132]/10 flex items-center justify-center mb-4">
             <Download className="w-5 h-5 text-[#c74132]" />
           </div>
-          <div className="text-lg font-serif italic text-[#1a120c] mb-1">Full Revenue Report</div>
+          <div className="text-lg font-serif text-[#1a120c] mb-1">Full Revenue Report</div>
           <p className="text-sm text-[#7a6858] mb-5">Every booking for {monthLabel} — customer name, car, dates, amount collected, status.</p>
           <button onClick={downloadFullReport} disabled={loading === 'full'}
             className="w-full py-3 bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] rounded-full text-xs uppercase tracking-wider disabled:opacity-50 transition-colors font-medium">
@@ -4116,7 +4149,7 @@ function AdminReports() {
           <div className="w-10 h-10 rounded-xl bg-[#c74132]/10 flex items-center justify-center mb-4">
             <Car className="w-5 h-5 text-[#c74132]" />
           </div>
-          <div className="text-lg font-serif italic text-[#1a120c] mb-1">Car-wise Revenue</div>
+          <div className="text-lg font-serif text-[#1a120c] mb-1">Car-wise Revenue</div>
           <p className="text-sm text-[#7a6858] mb-5">Each car's total trips, days on road, and revenue earned in {monthLabel}.</p>
           <button onClick={downloadCarReport} disabled={loading === 'car'}
             className="w-full py-3 bg-[#1a120c] hover:bg-[#3d2e1e] text-[#f4e8d0] rounded-full text-xs uppercase tracking-wider disabled:opacity-50 transition-colors font-medium">
@@ -4179,7 +4212,7 @@ function AdminPages() {
     <motion.div {...fadeUp}>
       <div className="mb-8">
         <div className="text-xs uppercase tracking-wider text-[#7a6858]">Footer pages · visible to customers</div>
-        <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Pages</h1>
+        <h1 className="text-4xl font-serif text-[#1a120c] mt-1">Pages</h1>
       </div>
 
       {saveError._load && (
@@ -4194,7 +4227,7 @@ function AdminPages() {
                 <input
                   value={pages[slug]?.title || ''}
                   onChange={e => setPages(p => ({ ...p, [slug]: { ...p[slug], title: e.target.value } }))}
-                  className="text-lg font-serif italic text-[#1a120c] bg-transparent outline-none border-b border-transparent focus:border-[#c74132] mt-0.5"
+                  className="text-lg font-serif text-[#1a120c] bg-transparent outline-none border-b border-transparent focus:border-[#c74132] mt-0.5"
                 />
               </div>
               <div className="flex items-center gap-3">
@@ -4280,7 +4313,7 @@ function AdminCalendar() {
       <div className="flex items-end justify-between flex-wrap gap-4 mb-6">
         <div>
           <div className="text-xs uppercase tracking-wider text-[#7a6858]">Fleet availability</div>
-          <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Calendar</h1>
+          <h1 className="text-4xl font-serif text-[#1a120c] mt-1">Calendar</h1>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => setMonthOffset(o => o - 1)}
@@ -4401,7 +4434,7 @@ function AdminCalendar() {
                   <X className="w-3.5 h-3.5 text-[#7a6858]" />
                 </button>
               </div>
-              <div className="text-xl font-serif italic text-[#1a120c] mb-1">{selected.customers?.full_name || '—'}</div>
+              <div className="text-xl font-serif text-[#1a120c] mb-1">{selected.customers?.full_name || '—'}</div>
               <div className="text-sm text-[#7a6858] mb-4">{selected.customers?.phone || ''}</div>
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
@@ -4485,7 +4518,7 @@ function AdminMaintenance() {
       <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
         <div>
           <div className="text-xs uppercase tracking-wider text-[#7a6858]">Vehicle health · live</div>
-          <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Service & maintenance</h1>
+          <h1 className="text-4xl font-serif text-[#1a120c] mt-1">Service & maintenance</h1>
         </div>
         <div className="flex gap-2">
           <button onClick={loadRecords} className="px-4 py-2 border border-[#bfaf9a] text-[#3d2e1e] rounded-full text-xs uppercase tracking-wider hover:border-[#c74132]/60">
@@ -4570,7 +4603,7 @@ function AdminMaintenance() {
               onClick={e => e.stopPropagation()}
               className="bg-[#fffaf4] border border-[#bfaf9a] rounded-2xl p-8 max-w-lg w-full">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-serif italic text-[#1a120c]">Add maintenance record</h2>
+                <h2 className="text-2xl font-serif text-[#1a120c]">Add maintenance record</h2>
                 <button onClick={() => setShowAdd(false)} className="w-9 h-9 rounded-full border border-[#bfaf9a] flex items-center justify-center">
                   <X className="w-4 h-4 text-[#5a4838]" />
                 </button>
@@ -4722,7 +4755,8 @@ export default function App() {
     <div className="min-h-screen bg-[#f4e8d0] text-[#1a120c]" style={{ fontFamily: "'Satoshi', ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`
         body { background: #f4e8d0; }
-        .font-serif { font-family: 'Cormorant Garamond', 'Times New Roman', Georgia, serif; font-weight: 500; letter-spacing: -0.02em; }
+        .font-serif { font-family: 'Satoshi', ui-sans-serif, system-ui, sans-serif; font-weight: 700; letter-spacing: -0.04em; }
+        .font-display { font-family: 'Cormorant Garamond', 'Times New Roman', Georgia, serif; font-weight: 500; letter-spacing: -0.02em; font-style: italic; }
         .font-mono { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #f4e8d0; }
