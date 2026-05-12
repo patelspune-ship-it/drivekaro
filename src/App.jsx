@@ -3478,11 +3478,11 @@ function AdminInvoices() {
     const { data, error } = await supabase
       .from('invoices')
       .select(`
-        id, invoice_number, amount, cgst, sgst, total, status, created_at,
+        id, invoice_number, amount, cgst, sgst, total, status,
         customers ( full_name, phone ),
         bookings ( booking_code, from_date, to_date, days, cars ( brand, model ) )
       `)
-      .order('created_at', { ascending: false });
+      .order('id', { ascending: false });
     if (error) {
       console.error('Invoices load error:', error.message);
     }
@@ -3563,7 +3563,7 @@ function AdminInvoices() {
                   <div className="text-[#9e8e7e] mt-0.5">{inv.bookings?.booking_code || "—"}</div>
                 </div>
                 <div className="col-span-3 text-[#1a120c] truncate">{inv.customers?.full_name || "—"}</div>
-                <div className="col-span-2 text-[#5a4838] font-mono text-xs">{inv.created_at?.slice(0, 10)}</div>
+                <div className="col-span-2 text-[#5a4838] font-mono text-xs">{inv.bookings?.from_date || '—'}</div>
                 <div className="col-span-2 text-[#1a120c] font-mono">{formatINR(inv.total)}</div>
                 <div className="col-span-2 flex justify-end items-center gap-2">
                   <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full ${inv.status === "paid" ? "bg-[#c74132]/15 text-[#d4483b]" : "bg-orange-300/10 text-orange-300"}`}>
@@ -3582,7 +3582,7 @@ function AdminInvoices() {
                 <div className="text-right">
                   <div className="text-[10px] uppercase tracking-wider text-zinc-400">Invoice</div>
                   <div className="text-sm font-mono text-zinc-800">{inv.invoice_number}</div>
-                  <div className="text-[10px] text-zinc-400 mt-0.5">{inv.created_at?.slice(0, 10)}</div>
+                  <div className="text-[10px] text-zinc-400 mt-0.5">{inv.bookings?.from_date || '—'}</div>
                 </div>
               </div>
               <div className="border-t border-zinc-100 pt-4 mb-4">
