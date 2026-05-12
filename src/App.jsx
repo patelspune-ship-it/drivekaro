@@ -4145,7 +4145,10 @@ function AdminPages() {
   useEffect(() => {
     supabase.from('site_pages').select('slug, title, content')
       .then(({ data, error }) => {
-        if (error) { console.error('site_pages load error:', error.message); return; }
+        if (error) {
+          setSaveError({ _load: 'Could not load pages: ' + error.message + '. Run GRANT ALL ON site_pages TO anon, authenticated; in Supabase SQL Editor.' });
+          return;
+        }
         const map = {};
         (data || []).forEach(p => { map[p.slug] = { title: p.title, content: p.content }; });
         setPages(map);
@@ -4156,13 +4159,12 @@ function AdminPages() {
     setSaving(s => ({ ...s, [slug]: true }));
     setSaveError(e => ({ ...e, [slug]: '' }));
 
-    const { error } = await supabase.from('site_pages')
-      .update({
-        title: pages[slug]?.title || slug,
-        content: pages[slug]?.content || '',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('slug', slug);
+    // Use upsert so it works whether the row exists or not
+    const { error } = await supabase.from('site_pages').upsert({
+      slug,
+      title: pages[slug]?.title || slug,
+      content: pages[slug]?.content || '',
+    }, { onConflict: 'slug' });
 
     setSaving(s => ({ ...s, [slug]: false }));
     if (error) {
@@ -4180,6 +4182,9 @@ function AdminPages() {
         <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Pages</h1>
       </div>
 
+      {saveError._load && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">{saveError._load}</div>
+      )}
       <div className="space-y-6">
         {slugs.map(({ slug, label }) => (
           <div key={slug} className="border border-[#d6c8b2] rounded-2xl bg-[#fffaf4] overflow-hidden">
