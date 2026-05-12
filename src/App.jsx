@@ -223,7 +223,6 @@ function CarVisual({ car, large = false }) {
         <div className={`text-white font-serif ${large ? "text-4xl" : "text-2xl"} leading-none tracking-tight`}>{car.model}</div>
         <div className="text-[10px] uppercase tracking-[0.2em] text-white/40 mt-1">{car.category} · {car.year}</div>
       </div>
-      <div className="absolute bottom-4 right-5 px-2 py-1 bg-black/40 border border-white/10 rounded text-[9px] font-mono text-white/60">{car.plate}</div>
     </div>
   );
 }
@@ -2387,6 +2386,139 @@ function AdminOverview() {
   );
 }
 
+/* ========================== CAR REVENUE MODAL ========================== */
+function CarRevenueModal({ car, onClose }) {
+  const now = new Date();
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [allBookings, setAllBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const viewDate = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+  const monthStr = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`;
+  const monthLabel = viewDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  const pad = n => String(n).padStart(2, '0');
+  const monthEnd = `${viewDate.getFullYear()}-${pad(viewDate.getMonth() + 1)}-31`;
+
+  useEffect(() => {
+    setLoading(true);
+    supabase.from('bookings')
+      .select('id, booking_code, from_date, to_date, days, total, actual_amount_paid, status, trip_to, customers(full_name, phone)')
+      .eq('car_id', car.id)
+      .not('status', 'in', '("enquiry","cancelled")')
+      .order('from_date', { ascending: false })
+      .then(({ data }) => { setAllBookings(data || []); setLoading(false); });
+  }, [car.id]);
+
+  const monthBookings = allBookings.filter(b => b.from_date?.startsWith(monthStr));
+  const lifetimeCompleted = allBookings.filter(b => b.status === 'completed');
+  const monthCompleted = monthBookings.filter(b => b.status === 'completed');
+  const lifetimeRevenue = lifetimeCompleted.reduce((s, b) => s + (b.actual_amount_paid || b.total || 0), 0);
+  const monthRevenue = monthCompleted.reduce((s, b) => s + (b.actual_amount_paid || b.total || 0), 0);
+  const activeNow = allBookings.some(b => b.status === 'active');
+
+  const statusColor = { active: 'text-emerald-600 bg-emerald-50', upcoming: 'text-blue-600 bg-blue-50', completed: 'text-[#7a6858] bg-[#ede3d5]' };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto">
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+        onClick={e => e.stopPropagation()}
+        className="bg-[#fffaf4] border border-[#d6c8b2] rounded-2xl max-w-2xl w-full my-8">
+
+        {/* Header */}
+        <div className="flex items-start justify-between px-7 pt-7 pb-5 border-b border-[#d6c8b2]">
+          <div>
+            <div className="text-xs uppercase tracking-wider text-[#7a6858]">Car performance</div>
+            <div className="text-2xl font-serif text-[#1a120c] mt-0.5">{car.brand} {car.model}</div>
+            {activeNow && (
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs text-emerald-600">Currently on trip</span>
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full border border-[#d6c8b2] flex items-center justify-center">
+            <X className="w-3.5 h-3.5 text-[#7a6858]" />
+          </button>
+        </div>
+
+        <div className="px-7 py-6 space-y-6">
+          {/* Lifetime stats */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="border border-[#d6c8b2] rounded-xl p-4 bg-[#f4e8d0]">
+              <div className="text-[10px] uppercase tracking-wider text-[#7a6858] mb-1">Lifetime revenue</div>
+              <div className="text-2xl font-serif text-[#1a120c]">{loading ? '—' : formatINR(lifetimeRevenue)}</div>
+              <div className="text-[10px] text-[#9e8e7e] mt-1">{lifetimeCompleted.length} completed trips</div>
+            </div>
+            <div className="border border-[#d6c8b2] rounded-xl p-4 bg-[#f4e8d0]">
+              <div className="text-[10px] uppercase tracking-wider text-[#7a6858] mb-1">Total bookings</div>
+              <div className="text-2xl font-serif text-[#1a120c]">{loading ? '—' : allBookings.length}</div>
+              <div className="text-[10px] text-[#9e8e7e] mt-1">all time</div>
+            </div>
+          </div>
+
+          {/* Month selector + stats */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <button onClick={() => setMonthOffset(o => o - 1)}
+                className="w-8 h-8 rounded-full border border-[#d6c8b2] flex items-center justify-center text-[#5a4838] hover:border-[#c74132]/50 transition-colors">‹</button>
+              <span className="text-sm font-semibold text-[#1a120c]">{monthLabel}</span>
+              <button onClick={() => setMonthOffset(o => Math.min(o + 1, 0))}
+                className="w-8 h-8 rounded-full border border-[#d6c8b2] flex items-center justify-center text-[#5a4838] hover:border-[#c74132]/50 transition-colors disabled:opacity-30" disabled={monthOffset === 0}>›</button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <div className="border border-[#c74132]/30 rounded-xl p-4 bg-[#c74132]/5">
+                <div className="text-[10px] uppercase tracking-wider text-[#c74132] mb-1">Revenue</div>
+                <div className="text-2xl font-serif text-[#1a120c]">{loading ? '—' : formatINR(monthRevenue)}</div>
+                <div className="text-[10px] text-[#9e8e7e] mt-1">from completed trips</div>
+              </div>
+              <div className="border border-[#c74132]/30 rounded-xl p-4 bg-[#c74132]/5">
+                <div className="text-[10px] uppercase tracking-wider text-[#c74132] mb-1">Bookings</div>
+                <div className="text-2xl font-serif text-[#1a120c]">{loading ? '—' : monthBookings.length}</div>
+                <div className="text-[10px] text-[#9e8e7e] mt-1">{monthCompleted.length} completed</div>
+              </div>
+            </div>
+
+            {/* Booking list for this month */}
+            <div className="text-xs uppercase tracking-wider text-[#7a6858] mb-3">Bookings in {monthLabel}</div>
+            {loading ? (
+              <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)}</div>
+            ) : monthBookings.length === 0 ? (
+              <div className="text-center py-8 text-sm text-[#9e8e7e] border border-dashed border-[#d6c8b2] rounded-xl">No bookings for {monthLabel}</div>
+            ) : (
+              <div className="space-y-2">
+                {monthBookings.map(b => (
+                  <div key={b.id} className="border border-[#d6c8b2] rounded-xl p-4 bg-white">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-[#1a120c] text-sm">{b.customers?.full_name || '—'}</span>
+                          <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-medium ${statusColor[b.status] || 'bg-[#ede3d5] text-[#7a6858]'}`}>{b.status}</span>
+                        </div>
+                        <div className="text-xs text-[#7a6858] mt-1">{b.customers?.phone}</div>
+                        <div className="text-xs font-mono text-[#9e8e7e] mt-1">{b.from_date} → {b.to_date} · {b.days} day{b.days !== 1 ? 's' : ''} · {b.booking_code}</div>
+                        {b.trip_to && <span className="text-[10px] text-[#5a4838] bg-[#ede3d5] px-1.5 py-0.5 rounded mt-1 inline-block">{b.trip_to}</span>}
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="font-semibold text-[#1a120c]">{formatINR(b.actual_amount_paid || b.total || 0)}</div>
+                        {b.actual_amount_paid && b.actual_amount_paid !== b.total && (
+                          <div className="text-[10px] text-[#9e8e7e]">est. {formatINR(b.total)}</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 /* ========================== CAR EDIT MODAL ========================== */
 function CarEditModal({ car, onClose, onSaved }) {
   const [form, setForm] = useState({
@@ -2600,6 +2732,7 @@ function AdminFleet() {
   const [showAdd, setShowAdd] = useState(false);
   const [editingCar, setEditingCar] = useState(null);
   const [calendarCar, setCalendarCar] = useState(null);
+  const [revenueCar, setRevenueCar] = useState(null);
   const [cars, setCars] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2758,6 +2891,10 @@ function AdminFleet() {
                 </span>
               </div>
               <div className="col-span-1 flex justify-end gap-1">
+                <button onClick={() => setRevenueCar(car)} title="Revenue stats"
+                  className="w-8 h-8 rounded-lg border border-[#bfaf9a] hover:border-[#c74132]/60 flex items-center justify-center transition-colors">
+                  <TrendingUp className="w-3.5 h-3.5 text-[#5a4838]" />
+                </button>
                 <button onClick={() => setCalendarCar(car)}
                   className="w-8 h-8 rounded-lg border border-[#bfaf9a] hover:border-[#c74132]/60 flex items-center justify-center transition-colors">
                   <CalendarDays className="w-3.5 h-3.5 text-[#5a4838]" />
@@ -2852,6 +2989,12 @@ function AdminFleet() {
       </AnimatePresence>
 
       <AnimatePresence>
+        {revenueCar && (
+          <CarRevenueModal car={revenueCar} onClose={() => setRevenueCar(null)} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {calendarCar && (
           <CarCalendarModal car={calendarCar} onClose={() => setCalendarCar(null)} />
         )}
@@ -2866,6 +3009,7 @@ function BookingEditModal({ booking: b, onClose, onSaved }) {
     to_date: b.to_date || '',
     status: b.status || 'upcoming',
     total: String(b.total || ''),
+    trip_to: b.trip_to || '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -2879,6 +3023,7 @@ function BookingEditModal({ booking: b, onClose, onSaved }) {
       status: form.status,
       total: newTotal,
       subtotal: newTotal,
+      trip_to: form.trip_to || null,
     }).eq('id', b.id);
     setSaving(false);
     if (err) { setError(err.message); return; }
@@ -2933,6 +3078,17 @@ function BookingEditModal({ booking: b, onClose, onSaved }) {
               <option value="cancelled">Cancelled</option>
             </select>
           </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">Trip to</label>
+            <select value={form.trip_to} onChange={e => setForm({ ...form, trip_to: e.target.value })} className={inputCls}>
+              <option value="">Not specified</option>
+              <option value="Local">Local (Pune)</option>
+              <option value="Mumbai">Mumbai</option>
+              <option value="Mahableshwar/Lonavala">Mahableshwar / Lonavala</option>
+              <option value="Konkan">Konkan</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
           {error && <div className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
           <div className="flex gap-3 pt-1">
             <button onClick={onClose} className="px-5 py-2.5 border border-[#bfaf9a] text-[#5a4838] rounded-full text-xs uppercase tracking-wider">Cancel</button>
@@ -2954,7 +3110,7 @@ function AdminBookings() {
   const [loading, setLoading] = useState(true);
   const [confirmingId, setConfirmingId] = useState(null);
   const [cars, setCars] = useState([]);
-  const [offlineForm, setOfflineForm] = useState({ car_id: "", customer_name: "", customer_phone: "", from_date: "", to_date: "", status: "upcoming", amount: "" });
+  const [offlineForm, setOfflineForm] = useState({ car_id: "", customer_name: "", customer_phone: "", from_date: "", to_date: "", status: "upcoming", amount: "", trip_to: "" });
   const [offlineError, setOfflineError] = useState("");
   const [offlineSaving, setOfflineSaving] = useState(false);
   const [endingTrip, setEndingTrip] = useState(null);
@@ -2969,7 +3125,7 @@ function AdminBookings() {
     const { data, error } = await supabase
       .from('bookings')
       .select(`
-        id, booking_code, car_id, from_date, to_date, days, subtotal, total, actual_amount_paid, status, source, payment_status, customer_id,
+        id, booking_code, car_id, from_date, to_date, days, subtotal, total, actual_amount_paid, status, source, payment_status, customer_id, trip_to,
         customers ( full_name, phone ),
         cars ( brand, model, plate_number )
       `)
@@ -3109,7 +3265,7 @@ function AdminBookings() {
   async function handleOfflineSubmit(e) {
     e.preventDefault();
     setOfflineError("");
-    const { car_id, customer_name, customer_phone, from_date, to_date, status } = offlineForm;
+    const { car_id, customer_name, customer_phone, from_date, to_date, status, trip_to } = offlineForm;
     const days = Math.max(1, Math.ceil((new Date(to_date) - new Date(from_date)) / 86400000));
     const carInfo = cars.find(c => c.id === car_id);
     const daily = carInfo?.price_per_day || 0;
@@ -3160,6 +3316,7 @@ function AdminBookings() {
       status,
       source: 'offline',
       payment_status: status === 'completed' ? 'paid' : 'pending',
+      trip_to: trip_to || null,
     }).select('id').single();
 
     if (bookErr) { setOfflineError("Failed to save: " + bookErr.message); setOfflineSaving(false); return; }
@@ -3179,7 +3336,7 @@ function AdminBookings() {
 
     setOfflineSaving(false);
     setShowOffline(false);
-    setOfflineForm({ car_id: "", customer_name: "", customer_phone: "", from_date: "", to_date: "", status: "upcoming", amount: "" });
+    setOfflineForm({ car_id: "", customer_name: "", customer_phone: "", from_date: "", to_date: "", status: "upcoming", amount: "", trip_to: "" });
     setOfflineError("");
     loadBookings();
   }
@@ -3255,6 +3412,7 @@ function AdminBookings() {
               <div className="col-span-2 min-w-0">
                 <div className={`font-mono text-xs ${b.status === 'enquiry' ? 'text-[#c74132]' : 'text-[#d4483b]'}`}>{b.booking_code}</div>
                 <div className="text-[10px] text-[#9e8e7e] mt-0.5">{b.source}</div>
+                {b.trip_to && <div className="text-[10px] text-[#5a4838] bg-[#ede3d5] px-1.5 py-0.5 rounded mt-1 inline-block">{b.trip_to}</div>}
               </div>
               <div className="col-span-3 min-w-0">
                 <div className="text-[#1a120c] truncate">{b.customers?.full_name || "—"}</div>
@@ -3476,6 +3634,18 @@ function AdminBookings() {
                     <option value="upcoming">Upcoming</option>
                     <option value="active">Active (on trip now)</option>
                     <option value="completed">Completed</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-[#7a6858]">Trip to</label>
+                  <select value={offlineForm.trip_to} onChange={e => setOfflineForm({ ...offlineForm, trip_to: e.target.value })}
+                    className="w-full mt-1.5 bg-[#ede3d5] border border-[#bfaf9a] rounded-lg px-4 py-2.5 text-[#1a120c]">
+                    <option value="">Not specified</option>
+                    <option value="Local">Local (Pune)</option>
+                    <option value="Mumbai">Mumbai</option>
+                    <option value="Mahableshwar/Lonavala">Mahableshwar / Lonavala</option>
+                    <option value="Konkan">Konkan</option>
+                    <option value="Other">Other</option>
                   </select>
                 </div>
                 {offlineError && (
