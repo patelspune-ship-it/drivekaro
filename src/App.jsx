@@ -439,6 +439,7 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
           plate: c.plate_number, rating: c.rating, trips: c.total_trips,
           image_url: c.image_url || null,
           image_urls: c.image_urls || [],
+          online_booking: c.online_booking !== false,
           gradient: gradients[i % gradients.length],
         })));
       });
@@ -1038,6 +1039,7 @@ function FleetPage({ setView, setSelectedCar, searchFrom, searchTo, setSearchFro
         trips: c.total_trips,
         image_url: c.image_url || null,
         image_urls: c.image_urls || [],
+        online_booking: c.online_booking !== false,
         gradient: gradients[i % gradients.length]
       }));
       setCars(mapped);
@@ -1213,6 +1215,10 @@ function FleetPage({ setView, setSelectedCar, searchFrom, searchTo, setSearchFro
                     </div>
                     {unavailable ? (
                       <span className="text-xs uppercase tracking-wider text-[#9e8e7e]">{badgeLabel}</span>
+                    ) : !car.online_booking ? (
+                      <span className="text-xs uppercase tracking-wider text-[#7a6858] inline-flex items-center gap-1">
+                        <Phone className="w-3 h-3" /> Contact to book
+                      </span>
                     ) : (
                       <span className="text-xs uppercase tracking-wider text-[#d4483b] inline-flex items-center gap-1 group-hover:gap-2 transition-all">
                         Book <ArrowRight className="w-3 h-3" />
@@ -1283,6 +1289,37 @@ function BookingPage({ car, setView, searchFrom, searchTo }) {
         <div className="text-[#5a4838]">No car selected.</div>
         <button onClick={() => setView("fleet")} className="mt-4 text-[#d4483b]">Browse fleet →</button>
       </div>
+    );
+  }
+
+  // Online booking is off — show contact screen instead of enquiry form
+  if (car.online_booking === false) {
+    return (
+      <motion.div {...fadeUp} className="max-w-lg mx-auto px-6 py-24 text-center">
+        <button onClick={() => setView("fleet")} className="text-xs uppercase tracking-wider text-[#7a6858] hover:text-[#d4483b] mb-10 block">← Back to fleet</button>
+        <div className="text-xs uppercase tracking-wider text-[#7a6858] mb-3">{car.brand}</div>
+        <h1 className="text-4xl font-serif italic text-[#1a120c] mb-8">{car.model}</h1>
+        <CarVisual car={car} />
+        <div className="mt-10 border-2 border-[#c74132]/30 rounded-2xl p-8 bg-[#fffaf4]">
+          <div className="text-xs uppercase tracking-wider text-[#7a6858] mb-3">Call or WhatsApp to book</div>
+          <a href="tel:+917666398984"
+            className="text-4xl font-serif text-[#c74132] hover:text-[#a33628] transition-colors block mb-1">
+            +91 76663 98984
+          </a>
+          <div className="text-xs text-[#9e8e7e] uppercase tracking-wider mb-6">Open 24 hours</div>
+          <div className="flex gap-3 justify-center">
+            <a href="tel:+917666398984"
+              className="flex-1 flex items-center justify-center gap-2 py-3 bg-[#c74132] text-[#1a120c] rounded-full text-xs uppercase tracking-wider hover:bg-[#a33628] transition-colors">
+              <Phone className="w-3.5 h-3.5" /> Call now
+            </a>
+            <a href="https://wa.me/917666398984" target="_blank" rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-2 py-3 border border-[#bfaf9a] text-[#3d2e1e] rounded-full text-xs uppercase tracking-wider hover:border-[#c74132]/50 transition-colors">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+              WhatsApp
+            </a>
+          </div>
+        </div>
+      </motion.div>
     );
   }
 
@@ -2529,6 +2566,14 @@ function AdminFleet() {
     else loadCars();
   }
 
+  async function toggleOnlineBooking(car) {
+    const { error } = await supabase.from('cars')
+      .update({ online_booking: !car.online_booking })
+      .eq('id', car.id);
+    if (error) alert("Error: " + error.message);
+    else loadCars();
+  }
+
   async function toggleStatus(car) {
     const newStatus = car.status === "available" ? "maintenance" : "available";
     const { error } = await supabase.from('cars').update({ status: newStatus }).eq('id', car.id);
@@ -2571,18 +2616,19 @@ function AdminFleet() {
       ) : (
         <div className="border border-[#d6c8b2] rounded-xl bg-[#fffaf4]/60 overflow-hidden">
           <div className="grid grid-cols-12 gap-4 px-5 py-3 border-b border-[#d6c8b2] text-[10px] uppercase tracking-wider text-[#7a6858]">
-            <div className="col-span-4">Vehicle</div>
+            <div className="col-span-3">Vehicle</div>
             <div className="col-span-2">Plate</div>
-            <div className="col-span-2">Status</div>
+            <div className="col-span-1">Status</div>
             <div className="col-span-1">Trips</div>
             <div className="col-span-2">Daily rate</div>
+            <div className="col-span-2">Online booking</div>
             <div className="col-span-1 text-right">Actions</div>
           </div>
           {cars.map((car, i) => (
             <motion.div key={car.id}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
               className="grid grid-cols-12 gap-4 items-center px-5 py-4 border-b border-[#d6c8b2] last:border-0 hover:bg-[#ede3d5]/40 transition-colors">
-              <div className="col-span-4 flex items-center gap-3 min-w-0">
+              <div className="col-span-3 flex items-center gap-3 min-w-0">
                 <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-orange-900/40 via-red-900/30 to-zinc-900 flex items-center justify-center flex-shrink-0 overflow-hidden">
                   {car.image_url
                     ? <img src={car.image_url} alt={car.model} className="w-full h-full object-cover" />
@@ -2595,11 +2641,21 @@ function AdminFleet() {
                 </div>
               </div>
               <div className="col-span-2 text-xs font-mono text-[#3d2e1e]">{car.plate_number}</div>
-              <div className="col-span-2">
+              <div className="col-span-1">
                 <StatusDot status={car.status} />
               </div>
               <div className="col-span-1 text-[#1a120c] font-mono text-sm">{car.total_trips}</div>
               <div className="col-span-2 text-[#1a120c] font-mono">{formatINR(car.price_per_day)}</div>
+              {/* Online booking toggle */}
+              <div className="col-span-2 flex items-center gap-2">
+                <button onClick={() => toggleOnlineBooking(car)}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${car.online_booking !== false ? 'bg-emerald-500' : 'bg-[#d6c8b2]'}`}>
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${car.online_booking !== false ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+                <span className={`text-[10px] uppercase tracking-wider ${car.online_booking !== false ? 'text-emerald-600' : 'text-[#9e8e7e]'}`}>
+                  {car.online_booking !== false ? 'On' : 'Off'}
+                </span>
+              </div>
               <div className="col-span-1 flex justify-end gap-1">
                 <button onClick={() => setCalendarCar(car)}
                   className="w-8 h-8 rounded-lg border border-[#bfaf9a] hover:border-[#c74132]/60 flex items-center justify-center transition-colors">
