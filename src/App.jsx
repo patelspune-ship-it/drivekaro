@@ -3468,6 +3468,77 @@ function AdminBookings() {
   );
 }
 
+function printInvoice(inv) {
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>${inv.invoice_number}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 40px; max-width: 600px; margin: 0 auto; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 2px solid #c74132; }
+    .brand { font-size: 24px; font-weight: 700; color: #c74132; letter-spacing: -0.5px; }
+    .brand-sub { font-size: 11px; color: #888; margin-top: 2px; }
+    .inv-meta { text-align: right; }
+    .inv-num { font-size: 18px; font-weight: 700; font-family: monospace; }
+    .inv-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 2px; }
+    .bill-to { margin-bottom: 28px; }
+    .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 6px; }
+    .customer-name { font-size: 18px; font-weight: 600; }
+    .customer-meta { font-size: 13px; color: #555; margin-top: 2px; }
+    .trip-box { background: #f9f5f0; border-radius: 8px; padding: 16px; margin-bottom: 28px; }
+    .trip-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+    .trip-label { color: #666; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+    th { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #888; text-align: left; padding: 8px 0; border-bottom: 1px solid #eee; }
+    td { padding: 10px 0; font-size: 14px; border-bottom: 1px solid #f0f0f0; }
+    td.amount { text-align: right; font-family: monospace; }
+    .total-row td { font-weight: 700; font-size: 16px; border-top: 2px solid #1a1a1a; border-bottom: none; padding-top: 12px; }
+    .status { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; background: ${inv.status === 'paid' ? '#e8f5e9' : '#fff3e0'}; color: ${inv.status === 'paid' ? '#2e7d32' : '#e65100'}; }
+    .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #999; line-height: 1.6; }
+    @media print { body { padding: 20px; } }
+  </style></head><body>
+  <div class="header">
+    <div><div class="brand">DriveKaro</div><div class="brand-sub">Self Drive · Pune</div></div>
+    <div class="inv-meta">
+      <div class="inv-label">Invoice</div>
+      <div class="inv-num">${inv.invoice_number}</div>
+      <div style="font-size:12px;color:#888;margin-top:4px;">${inv.bookings?.from_date || ''}</div>
+      <div style="margin-top:6px"><span class="status">${inv.status}</span></div>
+    </div>
+  </div>
+  <div class="bill-to">
+    <div class="section-label">Bill to</div>
+    <div class="customer-name">${inv.customers?.full_name || '—'}</div>
+    <div class="customer-meta">${inv.customers?.phone || ''}</div>
+  </div>
+  ${inv.bookings ? `<div class="trip-box">
+    <div class="section-label">Trip details</div>
+    <div class="trip-row"><span class="trip-label">Vehicle</span><span>${inv.bookings.cars?.brand || ''} ${inv.bookings.cars?.model || ''}</span></div>
+    <div class="trip-row"><span class="trip-label">Pickup</span><span>${inv.bookings.from_date}</span></div>
+    <div class="trip-row"><span class="trip-label">Return</span><span>${inv.bookings.to_date}</span></div>
+    <div class="trip-row"><span class="trip-label">Duration</span><span>${inv.bookings.days} day${inv.bookings.days !== 1 ? 's' : ''}</span></div>
+    <div class="trip-row"><span class="trip-label">Ref</span><span>${inv.bookings.booking_code}</span></div>
+  </div>` : ''}
+  <table>
+    <thead><tr><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Rental charge</td><td class="amount">₹${(inv.amount || 0).toLocaleString('en-IN')}</td></tr>
+      ${inv.cgst ? `<tr><td>CGST 9%</td><td class="amount">₹${(inv.cgst).toLocaleString('en-IN')}</td></tr>` : ''}
+      ${inv.sgst ? `<tr><td>SGST 9%</td><td class="amount">₹${(inv.sgst).toLocaleString('en-IN')}</td></tr>` : ''}
+      <tr class="total-row"><td>Total</td><td class="amount">₹${(inv.total || 0).toLocaleString('en-IN')}</td></tr>
+    </tbody>
+  </table>
+  <div class="footer">
+    <div>DriveKaro · Kool Homes Solitaire, Kausar Baugh, Kondhwa, Pune 411048</div>
+    <div>+91 76663 98984 · hi@drivekaro.in · instagram.com/drivekaro.in</div>
+    <div style="margin-top:4px">Auto-generated invoice · Valid without signature.</div>
+  </div>
+  <script>window.onload = () => { window.print(); }<\/script>
+  </body></html>`;
+  const w = window.open('', '_blank', 'width=700,height=900');
+  w.document.write(html);
+  w.document.close();
+}
+
 function AdminInvoices() {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3569,6 +3640,10 @@ function AdminInvoices() {
                   <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full ${inv.status === "paid" ? "bg-[#c74132]/15 text-[#d4483b]" : "bg-orange-300/10 text-orange-300"}`}>
                     {inv.status}
                   </span>
+                  <button onClick={() => printInvoice(inv)} title="Download / Print"
+                    className="w-7 h-7 rounded-lg border border-[#bfaf9a] hover:border-[#c74132]/50 flex items-center justify-center transition-colors">
+                    <Download className="w-3 h-3 text-[#5a4838]" />
+                  </button>
                 </div>
               </motion.div>
             ))}
@@ -3615,8 +3690,12 @@ function AdminInvoices() {
               <div className="mt-4 pt-4 border-t border-zinc-200 text-[10px] text-zinc-400 space-y-0.5">
                 <div>Kool Homes Solitaire, Kausar Baugh, Kondhwa, Pune 411048</div>
                 <div>+91 76663 98984 · hi@drivekaro.in</div>
-                <div>GSTIN: [Update with your GSTIN] · Auto-generated · Valid without signature.</div>
+                <div>Auto-generated · Valid without signature.</div>
               </div>
+              <button onClick={() => printInvoice(inv)}
+                className="mt-4 w-full flex items-center justify-center gap-2 py-2.5 bg-[#1a120c] hover:bg-[#c74132] text-[#f4e8d0] rounded-full text-xs uppercase tracking-wider transition-colors">
+                <Download className="w-3.5 h-3.5" /> Download / Print PDF
+              </button>
             </div>
           )}
         </div>
