@@ -3,7 +3,9 @@
     "allow": [
       "Bash(npx vite *)",
       "Bash(node *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(npm install *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring, useReducedMotion } from "framer-motion";
 import {
   Car, Menu, X, ArrowRight, ArrowUpRight, Calendar, MapPin, Users, Fuel,
@@ -228,18 +229,20 @@ function CarVisual({ car, large = false }) {
 }
 
 /* ========================== TOP NAV ========================== */
-function Nav({ view, setView, ownerSession, customerProfile, onScrollTo, onCustomerSignIn, onCustomerSignOut }) {
+function Nav({ ownerSession, customerProfile, onScrollTo, onCustomerSignIn, onCustomerSignOut }) {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
   const customerNav = [
-    { id: "home", label: "Home" },
-    { id: "fleet", label: "Fleet" },
-    { id: "customer-dash", label: "My Trips" },
+    { id: "home", label: "Home", path: "/" },
+    { id: "fleet", label: "Fleet", path: "/fleet" },
+    { id: "customer-dash", label: "My Trips", path: "/my-trips" },
     { id: "faq", label: "FAQs", scroll: true },
     { id: "contact", label: "Contact", scroll: true },
   ];
   return (
     <header className="sticky top-0 z-40 backdrop-blur-xl bg-[#f4e8d0]/92 border-b border-[#d6c8b2]">
       <div className="max-w-[1400px] mx-auto px-6 lg:px-10 h-16 flex items-center justify-between">
-        <button onClick={() => setView("home")} className="flex items-center group">
+        <button onClick={() => navigate("/")} className="flex items-center group">
           <img src="/logo-transparent.png" alt="DriveKaro" className="h-8 w-auto" />
         </button>
 
@@ -247,9 +250,9 @@ function Nav({ view, setView, ownerSession, customerProfile, onScrollTo, onCusto
           {customerNav.map(n => (
             <button
               key={n.id}
-              onClick={() => n.scroll ? onScrollTo(n.id) : setView(n.id)}
+              onClick={() => n.scroll ? onScrollTo(n.id) : navigate(n.path)}
               className={`px-4 py-2 text-sm rounded-full transition-all ${
-                !n.scroll && view === n.id
+                !n.scroll && pathname === n.path
                   ? "text-[#1a120c] bg-[#ede3d5]"
                   : "text-[#5a4838] hover:text-[#1a120c]"
               }`}
@@ -262,9 +265,9 @@ function Nav({ view, setView, ownerSession, customerProfile, onScrollTo, onCusto
         <div className="flex items-center gap-3">
           {ownerSession && (
             <button
-              onClick={() => setView("admin-dash")}
+              onClick={() => navigate("/admin")}
               className={`hidden sm:inline-flex items-center gap-2 px-4 py-2 text-xs uppercase tracking-wider rounded-full border transition-all ${
-                view === "admin-dash"
+                pathname === "/admin"
                   ? "bg-[#c74132] border-[#c74132] text-[#1a120c]"
                   : "border-[#bfaf9a] text-[#3d2e1e] hover:border-[#c74132] hover:text-[#d4483b]"
               }`}
@@ -275,7 +278,7 @@ function Nav({ view, setView, ownerSession, customerProfile, onScrollTo, onCusto
           )}
           {customerProfile ? (
             <div className="flex items-center gap-2">
-              <button onClick={() => setView("customer-dash")}
+              <button onClick={() => navigate("/my-trips")}
                 className="px-4 py-2 text-xs uppercase tracking-wider rounded-full bg-[#ede3d5] text-[#1a120c] hover:bg-[#d6c8b2] transition-colors">
                 {customerProfile.full_name?.split(' ')[0] || 'My Trips'}
               </button>
@@ -410,11 +413,21 @@ function PageModal({ slug, onClose }) {
 }
 
 /* ========================== LANDING PAGE ========================== */
-function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom, setSearchTo }) {
+function Landing({ goToBooking, searchFrom, searchTo, setSearchFrom, setSearchTo }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [pickup, setPickup] = useState("Pune Hub (NIBM Road)");
   const [openFaq, setOpenFaq] = useState(null);
   const [featuredCars, setFeaturedCars] = useState([]);
-  const [showPage, setShowPage] = useState(null); // 'about' | 'terms' | 'privacy'
+  const [showPage, setShowPage] = useState(null);
+
+  // Handle scroll-to from navigation state (e.g. FAQ/Contact from other pages)
+  useEffect(() => {
+    const scrollTo = location.state?.scrollTo;
+    if (scrollTo) {
+      setTimeout(() => document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth' }), 100);
+    }
+  }, []);
 
   useEffect(() => {
     const gradients = [
@@ -500,7 +513,7 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
                 <input type="date" value={searchTo} min={searchFrom} onChange={e => setSearchTo(e.target.value)} className="mt-2 w-full bg-transparent text-[#1a120c] text-lg outline-none [color-scheme:light]" />
               </div>
               <button
-                onClick={() => setView("fleet")}
+                onClick={() => navigate("/fleet")}
                 className="bg-[#c74132] hover:bg-[#d63239] text-[#1a120c] p-5 flex items-center justify-between group transition-colors"
               >
                 <div className="text-left">
@@ -560,7 +573,7 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
               initial={{ scaleX: 0 }} whileInView={{ scaleX: 1 }}
               viewport={{ once: true }} transition={{ duration: 0.6, delay: 0.35, ease: [0.22, 1, 0.36, 1] }} />
           </motion.div>
-          <button onClick={() => setView("fleet")} className="text-sm uppercase tracking-wider text-[#5a4838] hover:text-[#d4483b] inline-flex items-center gap-2 group">
+          <button onClick={() => navigate("/fleet")} className="text-sm uppercase tracking-wider text-[#5a4838] hover:text-[#d4483b] inline-flex items-center gap-2 group">
             View all cars
             <ArrowUpRight className="w-4 h-4 group-hover:rotate-45 transition-transform" />
           </button>
@@ -585,7 +598,7 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, amount: 0.2 }}
                   transition={{ duration: 0.6, delay: i * 0.07, ease: [0.22, 1, 0.36, 1] }}
-                  onClick={() => { setSelectedCar(car); setView("booking"); }}
+                  onClick={() => goToBooking(car)}
                   className="cursor-pointer group"
                 >
                   <CarVisual car={car} />
@@ -989,7 +1002,7 @@ function Landing({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom,
 }
 
 /* ========================== FLEET PAGE ========================== */
-function FleetPage({ setView, setSelectedCar, searchFrom, searchTo, setSearchFrom, setSearchTo }) {
+function FleetPage({ setView, goToBooking, searchFrom, searchTo, setSearchFrom, setSearchTo }) {
   const [filter, setFilter] = useState("All");
   const [transmission, setTransmission] = useState("All");
   const [cars, setCars] = useState([]);
@@ -1173,7 +1186,7 @@ function FleetPage({ setView, setSelectedCar, searchFrom, searchTo, setSearchFro
               <motion.div layout
                 initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.4, delay: i * 0.04 }}
-                onClick={unavailable ? undefined : () => { setSelectedCar(car); setView("booking"); }}
+                onClick={unavailable ? undefined : () => goToBooking(car)}
                 className={unavailable ? "cursor-not-allowed" : "cursor-pointer group"}>
 
                 {/* Car visual — greyed if unavailable */}
@@ -1237,7 +1250,9 @@ function FleetPage({ setView, setSelectedCar, searchFrom, searchTo, setSearchFro
 }
 
 /* ========================== BOOKING PAGE ========================== */
-function BookingPage({ car, setView, searchFrom, searchTo }) {
+function BookingPage({ setView, searchFrom, searchTo }) {
+  const { state } = useLocation();
+  const car = state?.car;
   const [step, setStep] = useState(1);
   const [stepDir, setStepDir] = useState(1); // 1=forward, -1=backward
   const [from, setFrom] = useState(searchFrom || todayStr());
@@ -1826,7 +1841,7 @@ function CustomerAuthModal({ onClose }) {
 }
 
 /* ========================== CUSTOMER DASHBOARD ========================== */
-function CustomerDashboard({ setView, setSelectedCar, customerProfile, customerSession, onSignIn }) {
+function CustomerDashboard({ setView, goToBooking, customerProfile, customerSession, onSignIn }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -4362,8 +4377,9 @@ function todayStr() { return new Date().toISOString().slice(0, 10); }
 function plusDays(n) { return new Date(Date.now() + n * 86400000).toISOString().slice(0, 10); }
 
 export default function App() {
-  const [view, setView] = useState("home");
-  const [selectedCar, setSelectedCar] = useState(null);
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const [ownerSession, setOwnerSession] = useState(null);
   const [customerSession, setCustomerSession] = useState(null);
   const [customerProfile, setCustomerProfile] = useState(null);
@@ -4372,7 +4388,17 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [searchFrom, setSearchFrom] = useState(todayStr);
   const [searchTo, setSearchTo] = useState(() => plusDays(3));
-  const [scrollTarget, setScrollTarget] = useState(null);
+
+  // setView wrapper — keeps old call-sites working
+  const setView = useCallback((v) => {
+    const routes = { home: '/', fleet: '/fleet', booking: '/booking', 'customer-dash': '/my-trips', 'admin-dash': '/admin' };
+    navigate(routes[v] ?? '/');
+  }, [navigate]);
+
+  // goToBooking — navigate to /booking passing car via router state
+  const goToBooking = useCallback((car) => {
+    navigate('/booking', { state: { car } });
+  }, [navigate]);
 
   async function applySession(session) {
     if (!session) {
@@ -4406,36 +4432,30 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Scroll to top on route change
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [view]);
-
-  useEffect(() => {
-    if (scrollTarget && view === "home") {
-      const el = document.getElementById(scrollTarget);
-      if (el) setTimeout(() => { el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 80);
-      setScrollTarget(null);
-    }
-  }, [view, scrollTarget]);
+  }, [location.pathname]);
 
   function handleScrollTo(sectionId) {
-    if (view === "home") {
+    if (location.pathname === '/') {
       document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
     } else {
-      setScrollTarget(sectionId);
-      setView("home");
+      navigate('/', { state: { scrollTo: sectionId } });
     }
   }
 
   useEffect(() => {
-    window.__dk_admin = () => setView("admin-dash");
+    window.__dk_admin = () => navigate('/admin');
     return () => { delete window.__dk_admin; };
-  }, []);
+  }, [navigate]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
-    setView("home");
+    navigate('/');
   }
+
+  const sharedProps = { setView, searchFrom, searchTo, setSearchFrom, setSearchTo };
 
   return (
     <div className="min-h-screen bg-[#f4e8d0] text-[#1a120c]" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
@@ -4455,7 +4475,7 @@ export default function App() {
       <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
       <NoiseOverlay />
-      <Nav view={view} setView={setView} ownerSession={ownerSession} customerProfile={customerProfile} onScrollTo={handleScrollTo} onCustomerSignIn={() => setShowCustomerAuth(true)} onCustomerSignOut={async () => { await supabase.auth.signOut(); }} />
+      <Nav ownerSession={ownerSession} customerProfile={customerProfile} onScrollTo={handleScrollTo} onCustomerSignIn={() => setShowCustomerAuth(true)} onCustomerSignOut={async () => { await supabase.auth.signOut(); }} />
       <AnimatePresence>
         {showCustomerAuth && <CustomerAuthModal onClose={() => setShowCustomerAuth(false)} />}
       </AnimatePresence>
@@ -4465,15 +4485,20 @@ export default function App() {
 
       <main className="relative z-10">
         <AnimatePresence mode="wait">
-          {view === "home" && <Landing key="home" setView={setView} setSelectedCar={setSelectedCar} searchFrom={searchFrom} searchTo={searchTo} setSearchFrom={setSearchFrom} setSearchTo={setSearchTo} />}
-          {view === "fleet" && <FleetPage key="fleet" setView={setView} setSelectedCar={setSelectedCar} searchFrom={searchFrom} searchTo={searchTo} setSearchFrom={setSearchFrom} setSearchTo={setSearchTo} />}
-          {view === "booking" && <BookingPage key="booking" car={selectedCar} setView={setView} searchFrom={searchFrom} searchTo={searchTo} />}
-          {view === "customer-dash" && <CustomerDashboard key="cust" setView={setView} setSelectedCar={setSelectedCar} customerProfile={customerProfile} customerSession={customerSession} onSignIn={() => setShowCustomerAuth(true)} />}
-          {view === "admin-dash" && !authLoading && (
-            ownerSession
-              ? <AdminDashboard key="admin" setView={setView} onLogout={handleLogout} ownerEmail={ownerSession?.user?.email} />
-              : <OwnerLoginScreen key="owner-login" onSuccess={() => {}} />
-          )}
+          <Routes location={location} key={location.pathname}>
+            <Route path="/" element={<Landing key="home" goToBooking={goToBooking} {...sharedProps} />} />
+            <Route path="/fleet" element={<FleetPage key="fleet" goToBooking={goToBooking} {...sharedProps} />} />
+            <Route path="/booking" element={<BookingPage key="booking" setView={setView} searchFrom={searchFrom} searchTo={searchTo} />} />
+            <Route path="/my-trips" element={<CustomerDashboard key="cust" setView={setView} goToBooking={goToBooking} customerProfile={customerProfile} customerSession={customerSession} onSignIn={() => setShowCustomerAuth(true)} />} />
+            <Route path="/admin" element={
+              !authLoading ? (
+                ownerSession
+                  ? <AdminDashboard key="admin" setView={setView} onLogout={handleLogout} ownerEmail={ownerSession?.user?.email} />
+                  : <OwnerLoginScreen key="owner-login" onSuccess={() => {}} />
+              ) : null
+            } />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </AnimatePresence>
       </main>
     </div>
