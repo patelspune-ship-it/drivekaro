@@ -2076,6 +2076,7 @@ function AdminDashboard({ setView, onLogout, ownerEmail }) {
     { id: "invoices", label: "Invoices", icon: Receipt },
     { id: "customers", label: "Customers", icon: Users },
     { id: "maintenance", label: "Service", icon: Wrench },
+    { id: "reports", label: "Reports", icon: Download },
     { id: "pages", label: "Pages", icon: FileText },
   ];
 
@@ -2129,6 +2130,7 @@ function AdminDashboard({ setView, onLogout, ownerEmail }) {
             {section === "invoices" && <AdminInvoices key="iv" />}
             {section === "customers" && <AdminCustomers key="cu" />}
             {section === "maintenance" && <AdminMaintenance key="mt" />}
+            {section === "reports" && <AdminReports key="rp" />}
             {section === "pages" && <AdminPages key="pg" />}
           </AnimatePresence>
         </div>
@@ -3970,6 +3972,160 @@ function CarCalendarModal({ car, onClose }) {
           </motion.div>
         )}
       </AnimatePresence>
+    </motion.div>
+  );
+}
+
+/* ========================== ADMIN REPORTS ========================== */
+function AdminReports() {
+  const now = new Date();
+  const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, '0'));
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [loading, setLoading] = useState(false);
+
+  const monthLabel = new Date(`${year}-${month}-01`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+  function toCSV(rows) {
+    if (!rows.length) return '';
+    const headers = Object.keys(rows[0]);
+    return [
+      headers.join(','),
+      ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+  }
+
+  function triggerDownload(csv, filename) {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadFullReport() {
+    setLoading('full');
+    const start = `${year}-${month}-01`;
+    const end = `${year}-${month}-31`;
+    const { data } = await supabase
+      .from('bookings')
+      .select('booking_code, from_date, to_date, days, actual_amount_paid, total, status, source, customers(full_name, phone), cars(brand, model, plate_number)')
+      .not('status', 'in', '("enquiry","cancelled")')
+      .gte('from_date', start)
+      .lte('from_date', end)
+      .order('from_date', { ascending: true });
+
+    const rows = (data || []).map(b => ({
+      'Booking Code': b.booking_code,
+      'Customer': b.customers?.full_name || '',
+      'Phone': b.customers?.phone || '',
+      'Car': `${b.cars?.brand || ''} ${b.cars?.model || ''}`,
+      'Plate': b.cars?.plate_number || '',
+      'From': b.from_date,
+      'To': b.to_date,
+      'Days': b.days,
+      'Amount Collected': b.actual_amount_paid || b.total || 0,
+      'Status': b.status,
+      'Source': b.source,
+    }));
+
+    if (!rows.length) { alert(`No bookings found for ${monthLabel}.`); setLoading(false); return; }
+    const total = rows.reduce((s, r) => s + Number(r['Amount Collected']), 0);
+    rows.push({ 'Booking Code': 'TOTAL', 'Customer': '', 'Phone': '', 'Car': '', 'Plate': '', 'From': '', 'To': '', 'Days': '', 'Amount Collected': total, 'Status': '', 'Source': '' });
+    triggerDownload(toCSV(rows), `DriveKaro-Revenue-${year}-${month}.csv`);
+    setLoading(false);
+  }
+
+  async function downloadCarReport() {
+    setLoading('car');
+    const start = `${year}-${month}-01`;
+    const end = `${year}-${month}-31`;
+    const { data } = await supabase
+      .from('bookings')
+      .select('actual_amount_paid, total, days, status, cars(brand, model, plate_number)')
+      .not('status', 'in', '("enquiry","cancelled")')
+      .gte('from_date', start)
+      .lte('from_date', end);
+
+    const carMap = {};
+    (data || []).forEach(b => {
+      const key = b.cars?.plate_number || 'Unknown';
+      if (!carMap[key]) carMap[key] = { car: `${b.cars?.brand || ''} ${b.cars?.model || ''}`, plate: key, trips: 0, days: 0, revenue: 0 };
+      carMap[key].trips += 1;
+      carMap[key].days += b.days || 0;
+      carMap[key].revenue += b.actual_amount_paid || b.total || 0;
+    });
+
+    const rows = Object.values(carMap).sort((a, b) => b.revenue - a.revenue).map(c => ({
+      'Car': c.car,
+      'Plate': c.plate,
+      'Trips': c.trips,
+      'Total Days': c.days,
+      'Revenue (₹)': c.revenue,
+    }));
+
+    if (!rows.length) { alert(`No bookings found for ${monthLabel}.`); setLoading(false); return; }
+    triggerDownload(toCSV(rows), `DriveKaro-CarWise-${year}-${month}.csv`);
+    setLoading(false);
+  }
+
+  const years = Array.from({ length: 3 }, (_, i) => String(now.getFullYear() - i));
+  const months = [
+    ['01','January'],['02','February'],['03','March'],['04','April'],
+    ['05','May'],['06','June'],['07','July'],['08','August'],
+    ['09','September'],['10','October'],['11','November'],['12','December']
+  ];
+
+  return (
+    <motion.div {...fadeUp}>
+      <div className="mb-8">
+        <div className="text-xs uppercase tracking-wider text-[#7a6858]">Export data</div>
+        <h1 className="text-4xl font-serif italic text-[#1a120c] mt-1">Reports</h1>
+      </div>
+
+      {/* Month selector */}
+      <div className="border border-[#d6c8b2] rounded-2xl p-6 bg-[#fffaf4] mb-6">
+        <div className="text-xs uppercase tracking-wider text-[#7a6858] mb-4">Select period</div>
+        <div className="flex gap-3 flex-wrap">
+          <select value={month} onChange={e => setMonth(e.target.value)}
+            className="bg-[#ede3d5] border border-[#bfaf9a] rounded-lg px-4 py-2.5 text-[#1a120c] outline-none focus:border-[#c74132]/60 text-sm">
+            {months.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <select value={year} onChange={e => setYear(e.target.value)}
+            className="bg-[#ede3d5] border border-[#bfaf9a] rounded-lg px-4 py-2.5 text-[#1a120c] outline-none focus:border-[#c74132]/60 text-sm">
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <div className="flex items-center text-sm text-[#7a6858]">→ {monthLabel}</div>
+        </div>
+      </div>
+
+      {/* Download cards */}
+      <div className="grid md:grid-cols-2 gap-5">
+        <div className="border border-[#d6c8b2] rounded-2xl p-6 bg-[#fffaf4] hover:border-[#c74132]/40 transition-colors">
+          <div className="w-10 h-10 rounded-xl bg-[#c74132]/10 flex items-center justify-center mb-4">
+            <Download className="w-5 h-5 text-[#c74132]" />
+          </div>
+          <div className="text-lg font-serif italic text-[#1a120c] mb-1">Full Revenue Report</div>
+          <p className="text-sm text-[#7a6858] mb-5">Every booking for {monthLabel} — customer name, car, dates, amount collected, status.</p>
+          <button onClick={downloadFullReport} disabled={loading === 'full'}
+            className="w-full py-3 bg-[#c74132] hover:bg-[#a33628] text-[#1a120c] rounded-full text-xs uppercase tracking-wider disabled:opacity-50 transition-colors font-medium">
+            {loading === 'full' ? 'Generating…' : `Download CSV — ${monthLabel}`}
+          </button>
+        </div>
+
+        <div className="border border-[#d6c8b2] rounded-2xl p-6 bg-[#fffaf4] hover:border-[#c74132]/40 transition-colors">
+          <div className="w-10 h-10 rounded-xl bg-[#c74132]/10 flex items-center justify-center mb-4">
+            <Car className="w-5 h-5 text-[#c74132]" />
+          </div>
+          <div className="text-lg font-serif italic text-[#1a120c] mb-1">Car-wise Revenue</div>
+          <p className="text-sm text-[#7a6858] mb-5">Each car's total trips, days on road, and revenue earned in {monthLabel}.</p>
+          <button onClick={downloadCarReport} disabled={loading === 'car'}
+            className="w-full py-3 bg-[#1a120c] hover:bg-[#3d2e1e] text-[#f4e8d0] rounded-full text-xs uppercase tracking-wider disabled:opacity-50 transition-colors font-medium">
+            {loading === 'car' ? 'Generating…' : `Download CSV — ${monthLabel}`}
+          </button>
+        </div>
+      </div>
+
+      <p className="text-xs text-[#9e8e7e] mt-6">CSV files open in Excel, Google Sheets, or any spreadsheet app. Only confirmed + completed bookings are included — enquiries are excluded.</p>
     </motion.div>
   );
 }
