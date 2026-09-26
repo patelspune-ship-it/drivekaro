@@ -1,0 +1,10 @@
+{
+  "name": "DriveKaro Booking Desk",
+  "short_name": "DK Desk",
+  "start_url": "/desk",
+  "scope": "/desk",
+  "display": "standalone",
+  "background_color": "#f4e8d0",
+  "theme_color": "#f4e8d0",
+  "icons": [{ "src": "/icon-steering.png", "sizes": "110x130", "type": "image/png", "purpose": "any" }]
+}
