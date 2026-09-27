@@ -98,7 +98,7 @@ function calc(b){
   const p=new Date(b.pickup), d=new Date(b.drop);
   const hours = (isNaN(p)||isNaN(d)) ? 0 : Math.max(0,(d-p)/36e5);
   const days = hours>0 ? Math.max(1, Math.ceil(hours/24 - 1e-9)) : 0;
-  const rate=Number(b.rate)||0, dep=Number(b.deposit)||0, delivery=Number(b.with_delivery? ch(b,"delivery_charge"):0)||0;
+  const rate=Number(b.rate)||0, dep=depCash(b), delivery=Number(b.with_delivery? ch(b,"delivery_charge"):0)||0;
   const rental = days*rate;
   return {hours, days, rental, delivery, payable:rental+delivery, deposit:dep, collected:rental+delivery+dep, km: days*(Number(ch(b,"km_per_day"))||0)};
 }
@@ -115,7 +115,7 @@ function saveFile(blob, filename){
 // On phones, open the share sheet so the PDF can go straight into WhatsApp; otherwise download.
 const fileSaver = { async save({filename, data}){
   try{
-    const file=new File([data], filename, {type:"application/pdf"});
+    const file=new File([data], filename, {type:(data&&data.type)||"application/pdf"});
     if(navigator.canShare && navigator.canShare({files:[file]}) && window.matchMedia("(max-width:900px)").matches){
       await navigator.share({files:[file], title:filename}); return {status:"delivered"};
     }
@@ -180,7 +180,7 @@ function localUpsert(list, obj){ const i=list.findIndex(x=>x.id===obj.id); if(i>
 function V(x){ return (x===undefined||x===null||x==="") ? null : String(x); }
 function buildAgreement(b){
   const s=S.settings, car=carOf(b)||{}, c=calc(b), sup=s.support_phone;
-  const dep = b.deposit!==""&&b.deposit!=null ? inr(b.deposit) : null;
+  const dep = depText(b); const cashDep = depType(b)==="cash";
   const hasAddl = !!(b.addl_name||"").trim();
   const T=[];
   T.push({h:"Parties", body:[
@@ -231,14 +231,16 @@ function buildAgreement(b){
     {t:"p", text:"3.5 DriveKaro may refuse or stop handover if verification cannot be completed, a document appears altered or does not match the person, or an Authorised Driver appears unfit to drive. DriveKaro will then refund all Charges and the Security Deposit paid, except where the refusal is due to a forged document or false information."}
   ]});
   T.push({h:"4. Charges, Security Deposit and Payment", body:[
-    {t:"p", text:"4.1 The Hirer shall pay the Rental Charges and other Charges stated in Schedule III. Rental Charges and the Security Deposit are payable in full before handover unless Schedule III states otherwise."},
+    {t:"p", text:"4.1 The Hirer shall pay the Rental Charges and other Charges stated in Schedule III. Rental Charges are payable, and the Security Deposit shall be paid or handed over, in full before handover unless Schedule III states otherwise."},
     {t:"p", text:"4.2 Rental Charges are calculated in blocks of 24 hours from the Start Time. A part block is charged as stated in Schedule III."},
     {t:"p", text:"4.3 The Rental Charges include the kilometre allowance stated in Schedule III. Distance beyond the allowance is charged at the excess kilometre rate in Schedule III, measured by the odometer readings in the Handover Record and the Return Record. If the odometer is faulty or has been tampered with, the distance recorded by the Tracking Device is used."},
     {t:"p", text:"4.4 The fixed charges in Schedule III for late return, fuel shortfall, cleaning, night handling, lost keys or documents and similar matters are a genuine pre-estimate of the loss DriveKaro is likely to suffer from each event and are not penalties. They do not cover damage to or loss of the Vehicle, which is dealt with in clause 10."},
     {t:"p", text:"4.5 Where DriveKaro pays any toll, fine, fuel, inter-state tax, permit fee or other amount that is the Hirer's responsibility, the Hirer shall reimburse it on demand together with the processing charge stated in Schedule III."},
     {t:"p", text:"4.6 DriveKaro is not registered under the Goods and Services Tax laws on the date of this Agreement and does not charge GST. If DriveKaro becomes registered, GST at the applicable rate shall be payable in addition to the Charges for bookings made after registration, and DriveKaro shall issue a tax invoice. DriveKaro shall issue a receipt for every amount collected."},
-    {t:"p", text:"4.7 The Security Deposit is interest-free and is held as security for the Hirer's obligations. It is not a limit on the Hirer's liability. After return of the Vehicle, DriveKaro shall refund the Security Deposit, less amounts due under this Agreement, within the period stated in Schedule III. DriveKaro may hold back the amount stated in Schedule III as the Challan Holdback for up to the period stated there, to cover traffic challans and tolls that are notified after return, and shall then refund any unused balance."},
-    {t:"p", text:`4.8 DriveKaro shall give the Hirer an itemised statement of any deduction, with supporting photographs, invoices or challan copies. The Hirer may dispute a deduction in writing within 7 days of receiving the statement. Any amount due in excess of the Security Deposit is payable within 7 days of the statement; unpaid amounts carry simple interest at ${s.late_interest} per cent per annum from the due date until payment.`},
+    cashDep
+      ? {t:"p", text:"4.7 The Security Deposit is interest-free and is held as security for the Hirer's obligations. It is not a limit on the Hirer's liability. After return of the Vehicle, DriveKaro shall refund the Security Deposit, less amounts due under this Agreement, within the period stated in Schedule III. DriveKaro may hold back the amount stated in Schedule III as the Challan Holdback for up to the period stated there, to cover traffic challans and tolls that are notified after return, and shall then refund any unused balance."}
+      : {t:"p", text:`4.7 The Hirer hands over the Security Deposit described in Schedule III as security for the Hirer's obligations under this Agreement. It is not a limit on the Hirer's liability. DriveKaro shall keep it safely, shall not use it, and shall return it to the Hirer when the Vehicle is returned and all amounts then due under this Agreement have been paid; until then DriveKaro may retain it.${depType(b)==="bike"?" The Hirer confirms that they own the two-wheeler or are authorised by its owner to give it as security, and that it has valid registration and insurance. DriveKaro is not responsible for ordinary wear or for any loss or damage to it not caused by DriveKaro's negligence while it is in DriveKaro's custody, and may keep it parked at its premises.":""}`},
+    {t:"p", text:`4.8 DriveKaro shall give the Hirer an itemised statement of any deduction, with supporting photographs, invoices or challan copies. The Hirer may dispute a deduction in writing within 7 days of receiving the statement. ${cashDep?"Any amount due in excess of the Security Deposit":"Any amount due"} is payable within 7 days of the statement; unpaid amounts carry simple interest at ${s.late_interest} per cent per annum from the due date until payment.`},
     {t:"p", text:"4.9 Payments are valid only when made to DriveKaro's official bank account or UPI ID stated in Schedule III, or in cash against a DriveKaro receipt. A payment made to any other account or person does not discharge the Hirer."}
   ]});
   T.push({h:"5. Handover and Inspection", body:[
@@ -246,7 +248,7 @@ function buildAgreement(b){
     {t:"p", text:"5.2 Before handover, the Parties shall inspect the Vehicle together. DriveKaro shall record the odometer reading, fuel or charge level, keys, accessories and all existing damage in the Handover Record, and shall share the time-stamped photographs and video with the Hirer before the keys are handed over."},
     {t:"p", text:"5.3 The Hirer shall point out any damage or defect not recorded before accepting the Vehicle. On acceptance, the Vehicle is treated as received in the condition shown in the Handover Record, except for defects that a reasonable inspection could not have revealed."},
     {t:"p", text:"5.4 DriveKaro shall provide the Vehicle Documents in the Vehicle, in physical form or through DigiLocker or mParivahan. The Hirer shall keep them safe and return them with the Vehicle."},
-    {t:"p", text:"5.5 DriveKaro is not required to hand over the Vehicle until this Agreement has been signed by both Parties, the Charges and Security Deposit due before handover have been paid, and verification under clause 3 is complete."}
+    {t:"p", text:"5.5 DriveKaro is not required to hand over the Vehicle until this Agreement has been signed by both Parties, the Charges due before handover have been paid, the Security Deposit has been paid or handed over, and verification under clause 3 is complete."}
   ]});
   T.push({h:"6. Permitted and Prohibited Use", body:[
     {t:"p", text:"6.1 The Vehicle may be used only for personal, family and leisure travel, driven by an Authorised Driver on public roads within India, excluding the areas listed in Schedule III as restricted unless DriveKaro approves them in writing (the \"Permitted Territory\")."},
@@ -331,7 +333,7 @@ function buildAgreement(b){
   ]});
   T.push({h:"11. Traffic Offences, Tolls and Seizure", body:[
     {t:"p", text:"11.1 The Hirer is responsible for all traffic challans, fines, penalties, compounding fees, tolls, parking charges and inter-state taxes or permit fees relating to the Vehicle during the Booking Period, including those notified after the Vehicle is returned."},
-    {t:"p", text:"11.2 DriveKaro shall send the Hirer a copy of each challan it receives. The Hirer shall pay it within 7 days and send proof, failing which DriveKaro may pay it and recover the amount under clause 4.5, including from the Challan Holdback. The Hirer consents to DriveKaro giving the Authorised Driver's name, address and licence details to any authority entitled to them, including under section 133 of the Motor Vehicles Act, 1988, and shall attend any court or authority where required."},
+    {t:"p", text:"11.2 DriveKaro shall send the Hirer a copy of each challan it receives. The Hirer shall pay it within 7 days and send proof, failing which DriveKaro may pay it and recover the amount under clause 4.5, including from any Challan Holdback. The Hirer consents to DriveKaro giving the Authorised Driver's name, address and licence details to any authority entitled to them, including under section 133 of the Motor Vehicles Act, 1988, and shall attend any court or authority where required."},
     {t:"p", text:"11.3 Tolls paid through the FASTag fitted to the Vehicle are recoverable from the Hirer at the amount deducted."},
     {t:"p", text:"11.4 If the Vehicle is detained, seized or impounded by any authority during the Booking Period because of an act or omission of an Authorised Driver, the Hirer shall inform DriveKaro within 1 hour, take all steps to secure its release, and pay all fines, release charges, towing and storage costs and the loss-of-use charge in Schedule III for each day until release. If the seizure is caused by a defect in the Vehicle Documents or any failure of DriveKaro, DriveKaro shall bear those costs and refund the Rental Charges for the lost period."}
   ]});
@@ -352,7 +354,7 @@ function buildAgreement(b){
     {t:"p", text:"12.8 After the Return Record is completed, the Hirer is not responsible for anything that happens to the Vehicle, except for Charges relating to the Booking Period that are notified later and for damage that could not reasonably be seen at the return inspection, such as underbody damage, notified to the Hirer with evidence within 48 hours of return."}
   ]});
   T.push({h:"13. Cancellation, Suspension and Termination", body:[
-    {t:"p", text:"13.1 The Hirer may cancel the booking before the Start Time, and refunds of the Rental Charges are made as stated in Schedule III. If the Vehicle is not handed over, the Security Deposit is refunded in full."},
+    {t:"p", text:"13.1 The Hirer may cancel the booking before the Start Time, and refunds of the Rental Charges are made as stated in Schedule III. If the Vehicle is not handed over, the Security Deposit is refunded or returned in full."},
     {t:"p", text:"13.2 If DriveKaro cancels before handover for any reason other than the Hirer's default, it shall refund all amounts paid in full within 7 days, or, if the Hirer agrees, provide a vehicle of the same or a higher category at no extra charge."},
     {t:"p", text:"13.3 DriveKaro may end the rental immediately by notice to the Hirer, including by WhatsApp or SMS, if:"},
     {t:"ol", items:[
@@ -505,8 +507,9 @@ function buildAgreement(b){
       ["Lost Vehicle Document", money(b,"lost_doc")],
       ["Tracking Device tampering", money(b,"gps_tamper")],
       ["Processing charge for challans and tolls paid by DriveKaro", `${money(b,"challan_fee")} per item`],
-      ["Challan Holdback", `${money(b,"challan_holdback")} for up to ${ch(b,"challan_days")} days`],
-      ["Security Deposit refund", `Within ${ch(b,"deposit_refund_days")} days of return`],
+      ...(cashDep ? [["Challan Holdback", `${money(b,"challan_holdback")} for up to ${ch(b,"challan_days")} days`],
+        ["Security Deposit refund", `Within ${ch(b,"deposit_refund_days")} days of return`]]
+        : [["Return of Security Deposit", "When the Vehicle is returned and all amounts due are paid"]]),
       ["Restricted areas", V(ch(b,"restricted_areas"))],
       ["Cancellation by Hirer", V(ch(b,"cancellation_terms"))]
     ]}
@@ -617,7 +620,10 @@ function validate(b, forReady){
     need("dl_till","Enter the licence expiry date.");
     need("emergency","Add an emergency contact.");
     need("rate","Enter the daily rate.");
-    if(b.deposit===""||b.deposit==null) e.deposit="Enter the security deposit.";
+    { const t=depType(b);
+      if(t==="cash" && (b.deposit===""||b.deposit==null)) e.deposit="Enter the security deposit amount.";
+      if(t==="bike" && !String(b.dep_bike_no||"").trim()) e.dep_bike_no="Enter the bike number.";
+      if(t==="document" && !b.dep_doc_type) e.dep_doc_type="Choose the document kept as deposit."; }
     if((b.addl_name||"").trim()){ need("addl_dl","Enter the additional driver's licence number."); need("addl_dl_till","Enter the licence expiry date."); need("addl_dob","Needed to check the age rule."); }
   }
   const car=S.fleet.find(c=>c.id===b.car_id); const min=/suv|luxury/i.test(car?.category||"")? s.min_age_premium : s.min_age;
@@ -644,6 +650,7 @@ function setTabs(){ document.querySelectorAll(".tab").forEach(t=>t.setAttribute(
 function render(){
   setTabs();
   if(S.view==="customers"){ $("#main").innerHTML=viewCustomers(); return; }
+  if(S.view==="revenue"){ $("#main").innerHTML=viewRevenue(); return; }
   const m=$("#main");
   if(S.view==="bookings") m.innerHTML = S.selected ? viewDetail() : viewList();
   else if(S.view==="new"){ m.innerHTML = viewForm(); updateSummary(); }
@@ -734,6 +741,7 @@ function invoiceText(b){
   if(L.c.delivery) lines.push(`Delivery: ${inr(L.c.delivery)}`);
   L.extras.forEach(x=>lines.push(`${x.label}${x.note?` (${x.note})`:""}: ${inr(x.amount)}`));
   lines.push(`*Total: ${inr(L.total)}*`, `Paid: ${inr(L.settled)}`, L.balance>0?`*Balance due: ${inr(L.balance)}*`:L.balance<0?`Excess paid, to be refunded: ${inr(-L.balance)}`:`Paid in full`);
+  if(depType(b)!=="cash") lines.push(``, `Security deposit: ${depShort(b)} (${b.dep_returned_at?"returned":"held"})`);
   if(L.depIn) lines.push(``, `Security deposit: received ${inr(L.depIn)}${L.depUsed?`, adjusted ${inr(L.depUsed)}`:""}${L.depOut?`, refunded ${inr(L.depOut)}`:""}${L.depHeld>0?`, held ${inr(L.depHeld)}`:""}`);
   if(L.balance>0 && s.official_upi) lines.push(``, `Please pay only to our UPI ID: ${s.official_upi}`);
   lines.push(``, `${s.legal_name} · ${s.support_phone}`);
@@ -760,6 +768,7 @@ function invoiceHTML(b){
       <tr class="inv-total"><td>${L.balance>0?"Balance due":L.balance<0?"Excess paid, to be refunded":"Balance due"}</td><td>${inr(Math.abs(L.balance))}</td></tr>
     </tbody></table>
     ${L.balance<=0?`<p class="inv-stamp">${L.balance<0?"EXCESS PAID":"PAID IN FULL"}</p>`:""}
+    ${depType(b)!=="cash"?`<p><b>Security deposit:</b> ${esc(depShort(b))}, ${b.dep_returned_at?"returned":"held by DriveKaro"}. Not part of the invoice amount.</p>`:""}
     ${L.depIn?`<p><b>Security deposit:</b> received ${inr(L.depIn)}${L.depUsed?`; adjusted against charges ${inr(L.depUsed)}`:""}${L.depOut?`; refunded ${inr(L.depOut)}`:""}; ${L.depHeld>0?`held ${inr(L.depHeld)}`:"fully settled"}. The deposit is not part of the invoice amount.</p>`:""}
     ${L.balance>0&&(s.official_upi||s.official_bank)?`<p><b>Pay only to:</b> ${esc([s.official_upi&&"UPI "+s.official_upi, s.official_bank&&"Bank "+s.official_bank].filter(Boolean).join(" · "))}</p>`:""}
     <p class="inv-foot">${esc(s.legal_name)} is not registered under GST; no GST has been charged. This invoice is issued under the rental agreement ${esc(b.id)}.</p>
@@ -788,6 +797,7 @@ function invoicePdf(b){
   doc.line(M,y-2,W-M,y-2); y+=2; row(L.balance<0?"Excess paid, to be refunded":"Balance due", inr(Math.abs(L.balance)), true);
   if(L.balance<=0){ doc.setTextColor(30,120,70); doc.setFont("helvetica","bold"); doc.setFontSize(12); t(L.balance<0?"EXCESS PAID":"PAID IN FULL",M,y+4); doc.setTextColor(0); doc.setFontSize(9); y+=10; }
   doc.setFont("helvetica","normal");
+  if(depType(b)!=="cash"){ wrap(`Security deposit: ${depShort(b)}, ${b.dep_returned_at?"returned":"held by DriveKaro"}. Not part of the invoice amount.`,CW).forEach(l=>{ t(l,M,y); y+=4.5; }); y+=2; }
   if(L.depIn){ wrap(`Security deposit: received ${inr(L.depIn)}${L.depUsed?`; adjusted against charges ${inr(L.depUsed)}`:""}${L.depOut?`; refunded ${inr(L.depOut)}`:""}; ${L.depHeld>0?`held ${inr(L.depHeld)}`:"fully settled"}. The deposit is not part of the invoice amount.`,CW).forEach(l=>{ t(l,M,y); y+=4.5; }); y+=2; }
   if(L.balance>0&&(s.official_upi||s.official_bank)){ t(`Pay only to: ${[s.official_upi&&"UPI "+s.official_upi, s.official_bank&&"Bank "+s.official_bank].filter(Boolean).join(" | ")}`,M,y); y+=6; }
   doc.setFontSize(8); doc.setTextColor(110); wrap(`${s.legal_name} is not registered under GST; no GST has been charged. This invoice is issued under the rental agreement ${b.id}.`,CW).forEach(l=>{ t(l,M,y+4); y+=4; });
@@ -799,16 +809,17 @@ function viewPayments(b){
   const due=L.c.days?L.c.collected:0;
   const quick=[];
   if(L.balance>0) quick.push(`<button type="button" class="btn sm" data-act="quick-pay" data-kind="payment" data-amount="${L.balance}">Rental balance ${inr(L.balance)}</button>`);
-  if(Number(b.deposit)>0 && L.depIn<Number(b.deposit)) quick.push(`<button type="button" class="btn sm" data-act="quick-pay" data-kind="deposit_in" data-amount="${Number(b.deposit)-L.depIn}">Deposit ${inr(Number(b.deposit)-L.depIn)}</button>`);
+  if(depType(b)==="cash" && Number(b.deposit)>0 && L.depIn<Number(b.deposit)) quick.push(`<button type="button" class="btn sm" data-act="quick-pay" data-kind="deposit_in" data-amount="${Number(b.deposit)-L.depIn}">Deposit ${inr(Number(b.deposit)-L.depIn)}</button>`);
   const use=Math.min(L.depHeld, Math.max(L.balance,0)), refund=L.depHeld-use;
   return `
   <div class="money">
     <div class="tile"><span class="label">Invoice total</span><b class="num">${inr(L.total)}</b><small>${L.extras.length?`incl. ${inr(L.extrasTotal)} extra charges`:"rental"+(L.c.delivery?" + delivery":"")}</small></div>
     <div class="tile"><span class="label">Paid</span><b class="num">${inr(L.settled)}</b><small>${L.depUsed?`incl. ${inr(L.depUsed)} from deposit`:"&nbsp;"}</small></div>
     <div class="tile ${L.balance>0?"t-bad":"t-ok"}"><span class="label">${L.balance<0?"Excess paid":"Balance due"}</span><b class="num">${inr(Math.abs(L.balance))}</b><small>${L.balance>0?"to collect":L.balance<0?"refund to customer":"paid in full"}</small></div>
-    <div class="tile"><span class="label">Deposit held</span><b class="num">${inr(L.depHeld)}</b><small>${L.depIn?`of ${inr(L.depIn)} received`:"not received yet"}</small></div>
+    ${depType(b)==="cash" ? `<div class="tile"><span class="label">Deposit held</span><b class="num">${inr(L.depHeld)}</b><small>${L.depIn?`of ${inr(L.depIn)} received`:"not received yet"}</small></div>`
+      : `<div class="tile"><span class="label">Security held</span><b style="font-size:16px">${esc(depShort(b))}</b><small>${b.dep_returned_at?`returned ${esc(fmtD(b.dep_returned_at))}`:"with DriveKaro"}</small></div>`}
   </div>
-  ${["signed","ready","sent"].includes(b.status) && due ? `<p class="note">Collect before handover: <b>${inr(due)}</b> (rental ${inr(L.c.rental+L.c.delivery)} + deposit ${inr(L.c.deposit)}).</p>`:""}
+  ${["signed","ready","sent"].includes(b.status) && due ? `<p class="note">Collect before handover: <b>${inr(due)}</b> (rental ${inr(L.c.rental+L.c.delivery)}${L.c.deposit?` + deposit ${inr(L.c.deposit)}`:""})${depType(b)!=="cash"?`, and take the security: ${esc(depShort(b))}`:""}.</p>`:""}
 
   <section class="pcard"><h3>Record a payment</h3>
     ${quick.length?`<div class="actions" style="margin-bottom:10px"><span class="muted" style="font-size:13px;align-self:center">Quick fill:</span>${quick.join("")}</div>`:""}
@@ -843,6 +854,7 @@ function viewPayments(b){
     <div id="xerr"></div>
     <div class="actions" style="margin-top:10px"><button type="button" class="btn" data-act="add-extra">Add charge</button></div>
     ${L.extras.length?`<div class="tablewrap"><table class="ptable num"><tbody>${L.extras.map(x=>`<tr><td>${esc(x.label)}${x.note?`<br><small class="muted">${esc(x.note)}</small>`:""}</td><td style="text-align:right">${inr(x.amount)}</td><td class="rowact"><button class="btn sm" data-act="del-extra" data-id="${esc(x.id)}">Remove</button></td></tr>`).join("")}</tbody></table></div>`:""}
+    ${depType(b)!=="cash"?`<div class="settle"><div><b>Security:</b> ${esc(depShort(b))} · ${b.dep_returned_at?`returned ${esc(fmtD(b.dep_returned_at))}`:"with DriveKaro"}</div><button class="btn sm" data-act="dep-return">${b.dep_returned_at?"Undo returned":"Mark returned"}</button></div>`:""}
     ${L.depHeld>0?`<div class="settle"><div><b>Settle deposit:</b> use ${inr(use)} for the balance and refund ${inr(refund)}.</div>
       ${S.confirmSettle?`<div class="actions"><button class="btn sm primary" data-act="do-settle" data-use="${use}" data-refund="${refund}">Record it</button><button class="btn sm" data-act="cancel-settle">Not now</button></div>`:`<button class="btn sm" data-act="ask-settle">Settle deposit</button>`}</div>`:""}
   </section>
@@ -890,7 +902,7 @@ function viewDetail(){
           <dt>Duration</dt><dd>${esc(durText(c))}</dd>
           <dt>Rental</dt><dd>${c.days?inr(c.rental):"—"}</dd>
           ${c.delivery?`<dt>Delivery</dt><dd>${inr(c.delivery)}</dd>`:""}
-          <dt>Deposit</dt><dd>${inr(c.deposit)}</dd>
+          <dt>Security deposit</dt><dd>${esc(depShort(b))}</dd>
           <dt class="total">Collect before handover</dt><dd class="total">${c.days?inr(c.collected):"—"}</dd>
           <dt>Km included</dt><dd>${c.km} km</dd>
         </dl>
@@ -1069,7 +1081,7 @@ function pickCar(id){
 const FORM_MAP={name:"f_name",father:"f_father",dob:"f_dob",phone:"f_phone",alt_phone:"f_alt",email:"f_email",address:"f_address",emergency:"f_emergency",
   dl:"f_dl",dl_till:"f_dl_till",rto:"f_rto",id_type:"f_idtype",aadhaar4:"f_aadhaar4",
   addl_name:"f_addl_name",addl_dob:"f_addl_dob",addl_phone:"f_addl_phone",addl_dl:"f_addl_dl",addl_dl_till:"f_addl_dl_till",
-  customer_id:"f_custid",car_id:"f_car",pickup:"f_pickup",drop:"f_drop",location:"f_location",rate:"f_rate",deposit:"f_deposit",paymode:"f_paymode",payref:"f_payref",
+  customer_id:"f_custid",car_id:"f_car",pickup:"f_pickup",drop:"f_drop",location:"f_location",rate:"f_rate",deposit_type:"f_deptype",deposit:"f_deposit",dep_bike_no:"f_depbike",dep_bike_model:"f_depbikemodel",dep_doc_type:"f_depdoc",dep_doc_details:"f_depdocdet",paymode:"f_paymode",payref:"f_payref",
   odo:"f_odo",fuel:"f_fuel",keys:"f_keys",ext_damage:"f_ext",int_damage:"f_int",notes:"f_notes"};
 
 function viewForm(errs={}){
@@ -1079,7 +1091,7 @@ function viewForm(errs={}){
   const sub = t => `<span class="muted" style="font:400 13px var(--f-body)">${t}</span>`;
   const fc = custById(b.customer_id) || (b.phone ? custById(normPhone(b.phone)) : null);
   const kycErr = Object.keys(errs).some(k=>KYC_FIELDS.includes(k));
-  const showFields = (fc || g("phone")) && (!fc || kycMissing(b).length>0 || kycErr);
+  const showFields = (fc || g("phone")) && (!fc || kycErr);
   S.formCust = fc ? fc.id : (g("phone") ? "new:"+normPhone(g("phone")) : null);
   return `
   <div class="head-row"><h2>${S.editId?"Edit booking "+esc(S.editId):"New booking"}</h2>${S.editId?`<button class="btn sm" data-act="cancel-edit">Discard changes</button>`:""}</div>
@@ -1101,10 +1113,10 @@ function viewForm(errs={}){
       <fieldset><legend>3 · Price and charges ${sub("(for this booking only)")}</legend>
         <div class="grid">
           ${fieldHTML("f_rate","Daily rate (₹)",g("rate"),{type:"number",err:errs.rate,attrs:'min="0" step="50" inputmode="numeric"',hint:"Fills from the car; change it for a deal."})}
-          ${fieldHTML("f_deposit","Security deposit (₹)",g("deposit"),{type:"number",err:errs.deposit,attrs:'min="0" step="500" inputmode="numeric"',hint:"Fills from the car."})}
+          ${depFieldsHTML(g, errs)}
         </div>
         <details class="more" ${b.charges?"open":""}>
-          <summary>Other charges: km, late fee, cleaning, deductible and more</summary>
+          <summary>Other charges: km, late fee, cleaning and more</summary>
           <p class="note" style="margin:10px 0 12px">Filled from your default charges. Changes here print in Schedule III of this booking's agreement only. <button type="button" class="btn sm" data-act="reset-charges" style="margin-left:6px">Reset to defaults</button></p>
           <div class="grid">${chargeFieldsHTML("fc_", charges)}</div>
         </details>
@@ -1171,7 +1183,8 @@ function viewForm(errs={}){
 }
 function readForm(){
   const o={}; for(const k in FORM_MAP){ o[k]=($("#"+FORM_MAP[k])?.value??"").trim(); }
-  o.dl=o.dl.toUpperCase(); o.addl_dl=o.addl_dl.toUpperCase();
+  o.dl=o.dl.toUpperCase(); o.addl_dl=o.addl_dl.toUpperCase(); o.dep_bike_no=o.dep_bike_no.toUpperCase();
+  if(o.deposit_type!=="cash") o.deposit="";
   o.with_delivery = $("#f_delivery")?.value==="yes";
   o.charges = readCharges("fc_");
   return o;
@@ -1192,11 +1205,11 @@ function updateSummary(){
     <dt>Duration</dt><dd>${esc(durText(c))||"—"}</dd>
     <dt>Rental</dt><dd>${c.days&&b.rate?`${c.days} × ${inr(b.rate)} = ${inr(c.rental)}`:"—"}</dd>
     ${c.delivery?`<dt>Delivery</dt><dd>${inr(c.delivery)}</dd>`:""}
-    <dt>Deposit</dt><dd>${b.deposit!==""?inr(b.deposit):"—"}</dd>
+    <dt>Security deposit</dt><dd>${esc(depShort(b))}</dd>
     <dt class="total">Collect before handover</dt><dd class="total">${c.days&&b.rate?inr(c.collected):"—"}</dd>
     <dt>Km included</dt><dd>${c.km?c.km+" km":"—"}</dd>
     <dt>Extra km</dt><dd>${money(b,"extra_km")}/km</dd>
-    <dt>Deductible</dt><dd>${money(b,"deductible")}</dd>`;
+`;
 }
 
 /* ---------- fleet ---------- */
@@ -1229,7 +1242,7 @@ function viewCarProfile(c){
   return `
   <div class="head-row">
     <div><button class="btn sm" data-act="close-carview">← Fleet</button></div>
-    <div class="actions"><button class="btn" data-editcar="${esc(c.id)}">Edit car</button><button class="btn primary" data-act="book-car" data-car="${esc(c.id)}">New booking with this car</button></div>
+    <div class="actions"><button class="btn" data-editcar="${esc(c.id)}">Edit car</button><button class="btn" data-act="car-revenue" data-car="${esc(c.id)}">Revenue &amp; bookings</button><button class="btn primary" data-act="book-car" data-car="${esc(c.id)}">New booking with this car</button></div>
   </div>
   <div class="profile">
     <div class="card profile-top">
@@ -1430,16 +1443,16 @@ function custCardHTML(c, isNew){
   if(!c) return "";
   const miss=kycMissing(c), n=custBookings(c).filter(b=>b.status!=="cancelled").length;
   return `<div class="custcard ${c.blocked?"blocked":""}">
-    <div style="min-width:0"><b>${esc(c.name||"No name")}</b><div class="muted num" style="font-size:13px">${esc(fmtPhone(c.phone))} · ${n} previous booking${n===1?"":"s"}</div>
+    <div class="cc-main"><b>${esc(c.name||"No name")}</b><span class="muted num">${esc(fmtPhone(c.phone))}${c.dl?` · DL ${esc(c.dl)}`:""} · ${n} booking${n===1?"":"s"}</span>
       <div class="chips">${custChips(c)}</div>
-      ${c.blocked?`<div class="err" style="margin-top:6px">Marked do not rent${c.block_reason?`: ${esc(c.block_reason)}`:""}</div>`:""}
-      ${miss.length?`<div class="warnline" style="margin-top:6px">Missing: ${esc(miss.join(", "))}</div>`:""}</div>
-    <div class="actions"><button type="button" class="btn sm" data-act="cust-fields">${miss.length?"Fill details":"Edit details"}</button><button type="button" class="btn sm" data-custview="${esc(c.id)}" data-keepdraft="1">Profile</button><button type="button" class="btn sm" data-act="cust-change">Change</button></div>
+      ${c.blocked?`<div class="err" style="margin-top:4px">Do not rent${c.block_reason?`: ${esc(c.block_reason)}`:""}</div>`:""}
+      ${miss.length?`<div class="warnline" style="margin-top:4px">Missing: ${esc(miss.join(", "))}</div>`:""}</div>
+    <div class="cc-links"><button type="button" class="linkbtn" data-act="cust-fields" id="cc_edit">Edit</button><button type="button" class="linkbtn" data-custview="${esc(c.id)}" data-keepdraft="1">Profile</button><button type="button" class="linkbtn" data-act="cust-change">Change</button></div>
   </div>`;
 }
 function applyCustomer(c){
   setKycFields(c); $("#f_custid").value=c.id; $("#f_phone").value=fmtPhone(c.phone);
-  $("#custcard").innerHTML=custCardHTML(c); $("#custfields").hidden = kycMissing(c).length===0;
+  $("#custcard").innerHTML=custCardHTML(c); $("#custfields").hidden = true;
   $("#custdd").hidden=true; S.formCust=c.id; updateSummary();
 }
 function startNewCustomer(phone, name, email){
@@ -1624,6 +1637,125 @@ async function removeDoc(c, fileId){
   if(await write("customers/"+c.id, doc)){ localUpsert(S.customers, doc); S.confirmDoc=null; render(); toast("Removed. It's in Drive's bin for 30 days."); }
 }
 
+/* ---------- security deposit ---------- */
+const DEP_TYPES=[["cash","Cash / UPI"],["bike","Bike"],["document","Document"]];
+const DEP_DOCS=["Office ID card","College ID card","Voter ID","PAN card","Other"];
+function depType(b){ return b.deposit_type||"cash"; }
+function depCash(b){ return depType(b)==="cash" ? (Number(b.deposit)||0) : 0; }
+// Wording used in the agreement's Schedule III
+function depText(b){
+  const t=depType(b);
+  if(t==="bike") return b.dep_bike_no ? `Two-wheeler ${b.dep_bike_no}${b.dep_bike_model?` (${b.dep_bike_model})`:""}, with its keys and a copy of its registration certificate` : null;
+  if(t==="document") return b.dep_doc_type ? `Original ${b.dep_doc_type}${b.dep_doc_details?` (${b.dep_doc_details})`:""}` : null;
+  return (b.deposit!==""&&b.deposit!=null) ? `${inr(b.deposit)}, paid in cash or UPI` : null;
+}
+// Short label for screens and WhatsApp
+function depShort(b){
+  const t=depType(b);
+  if(t==="bike") return b.dep_bike_no ? `Bike ${b.dep_bike_no}` : "Bike (number not added)";
+  if(t==="document") return b.dep_doc_type ? b.dep_doc_type : "Document (not chosen)";
+  return (b.deposit!==""&&b.deposit!=null) ? inr(b.deposit) : "—";
+}
+function depFieldsHTML(g, errs){
+  const t=g("deposit_type")||"cash";
+  return `${selectHTML("f_deptype","Security deposit",t,DEP_TYPES)}
+    <div class="field depf" data-dep="cash" ${t==="cash"?"":"hidden"}><label for="f_deposit">Deposit amount (₹)</label><input id="f_deposit" type="number" value="${esc(g("deposit"))}" min="0" step="500" inputmode="numeric" ${errs.deposit?'aria-invalid="true"':""}>${errs.deposit?`<span class="err">${esc(errs.deposit)}</span>`:`<span class="hint">Fills from the car.</span>`}</div>
+    <div class="field depf" data-dep="bike" ${t==="bike"?"":"hidden"}><label for="f_depbike">Bike number</label><input id="f_depbike" value="${esc(g("dep_bike_no"))}" placeholder="MH12 AB 1234" style="text-transform:uppercase" ${errs.dep_bike_no?'aria-invalid="true"':""}>${errs.dep_bike_no?`<span class="err">${esc(errs.dep_bike_no)}</span>`:""}</div>
+    <div class="field depf" data-dep="bike" ${t==="bike"?"":"hidden"}><label for="f_depbikemodel">Bike make and model</label><input id="f_depbikemodel" value="${esc(g("dep_bike_model"))}" placeholder="Honda Activa"></div>
+    <div class="field depf" data-dep="document" ${t==="document"?"":"hidden"}><label for="f_depdoc">Which document</label><select id="f_depdoc" ${errs.dep_doc_type?'aria-invalid="true"':""}>${[["",""],...DEP_DOCS.map(x=>[x,x])].map(o=>`<option value="${esc(o[0])}" ${o[0]===(g("dep_doc_type")||"")?"selected":""}>${esc(o[1])}</option>`).join("")}</select>${errs.dep_doc_type?`<span class="err">${esc(errs.dep_doc_type)}</span>`:`<span class="hint">Don't keep original Aadhaar or passport.</span>`}</div>
+    <div class="field depf" data-dep="document" ${t==="document"?"":"hidden"}><label for="f_depdocdet">Document details</label><input id="f_depdocdet" value="${esc(g("dep_doc_details"))}" placeholder="e.g. Infosys ID, no. 123456"></div>`;
+}
+function showDepFields(){ const t=$("#f_deptype")?.value||"cash"; document.querySelectorAll(".depf").forEach(el=>el.hidden = el.dataset.dep!==t); }
+
+/* ---------- revenue ---------- */
+const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const EARNED=["handed","returned"], UPCOMING=["ready","sent","signed"];
+function ym(d){ const x=new Date(d); return isNaN(x)?"":`${x.getFullYear()}-${pad(x.getMonth()+1)}`; }
+function fyStartYear(d){ const x=new Date(d); return x.getMonth()>=3 ? x.getFullYear() : x.getFullYear()-1; }
+function fyName(y){ return `FY ${String(y).slice(2)}-${String(y+1).slice(2)}`; }
+function monthName(k){ const [y,m]=k.split("-").map(Number); return `${MONTHS[m-1]} ${y}`; }
+function sumUp(list){ let rev=0,rec=0,days=0,out=0; for(const b of list){ const L=ledger(b); rev+=L.total; rec+=L.settled; days+=L.c.days; out+=Math.max(0,L.balance); } return {n:list.length,rev,rec,days,out}; }
+function revModel(){
+  const car = S.repCar && S.repCar!=="all" ? S.fleet.find(c=>c.id===S.repCar) || (S.bookings.find(b=>b.car_id===S.repCar)?.car_snapshot) : null;
+  const month = S.repMonth || ym(new Date());
+  const [yy,mm]=month.split("-").map(Number);
+  const fyY = fyStartYear(new Date(yy,mm-1,1));
+  const all = S.bookings.filter(b=> !S.repCar || S.repCar==="all" || b.car_id===S.repCar);
+  const inFY = b=>{ const d=new Date(b.pickup); return !isNaN(d) && fyStartYear(d)===fyY; };
+  const earned = all.filter(b=>EARNED.includes(b.status));
+  const range = S.repRange||"month";
+  const list = (range==="month" ? all.filter(b=>ym(b.pickup)===month) : range==="fy" ? all.filter(inFY) : all)
+    .filter(b=>!["cancelled","draft"].includes(b.status)).sort((a,b)=>new Date(b.pickup)-new Date(a.pickup));
+  const rangeLabel = range==="month" ? monthName(month) : range==="fy" ? fyName(fyY) : "All time";
+  return { car, month, fyY, all, earned, inFY, list, range, rangeLabel };
+}
+function viewRevenue(){
+  const R=revModel(); const {car, month, fyY, earned, inFY, list, range}=R;
+  const M=sumUp(earned.filter(b=>ym(b.pickup)===month)), F=sumUp(earned.filter(inFY));
+  const now=new Date(); const U=sumUp(R.all.filter(b=>UPCOMING.includes(b.status) && new Date(b.drop)>=now));
+  const months=[...Array(12)].map((_,i)=>{ const d=new Date(fyY,3+i,1); const k=ym(d); return {k, label:`${MONTHS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, ...sumUp(earned.filter(b=>ym(b.pickup)===k))}; });
+  const maxRev=Math.max(1,...months.map(m=>m.rev));
+  const cars=[...S.fleet];
+  S.bookings.forEach(b=>{ if(b.car_id && !cars.some(c=>c.id===b.car_id) && b.car_snapshot) cars.push({id:b.car_id, ...b.car_snapshot, removed:true}); });
+  const perCar = (!S.repCar||S.repCar==="all") ? cars.map(c=>({c, ...sumUp(earned.filter(b=>b.car_id===c.id && inFY(b)))})).sort((a,b)=>b.rev-a.rev) : [];
+  const maxCar=Math.max(1,...perCar.map(x=>x.rev));
+  return `
+  <div class="head-row"><div><h2>Revenue</h2><div class="muted" style="font-size:14px">Revenue counts trips that have started (car handed over or returned), by pickup date. Deposits are not revenue.</div></div></div>
+  <div class="carchips" role="group" aria-label="Car">
+    <button class="chip" aria-pressed="${!S.repCar||S.repCar==="all"}" data-repcar="all">All cars</button>
+    ${cars.map(c=>`<button class="chip" aria-pressed="${S.repCar===c.id}" data-repcar="${esc(c.id)}"><span class="num">${esc(c.plate||c.id)}</span> · ${esc((c.make_model||"").split(" ").slice(0,2).join(" "))}</button>`).join("")}
+  </div>
+  <div class="rep-controls">
+    <div class="field"><label for="rep_month">Month</label><input id="rep_month" type="month" value="${esc(month)}"></div>
+    <div class="muted" style="font-size:13px;align-self:end;padding-bottom:10px">Financial year: <b>${fyName(fyY)}</b> (Apr–Mar)</div>
+  </div>
+  <div class="money">
+    <div class="tile"><span class="label">${esc(monthName(month))}</span><b class="num">${inr(M.rev)}</b><small>${M.n} trip${M.n===1?"":"s"} · ${M.days} day${M.days===1?"":"s"}</small></div>
+    <div class="tile"><span class="label">${fyName(fyY)}</span><b class="num">${inr(F.rev)}</b><small>${F.n} trip${F.n===1?"":"s"} · ${F.days} days</small></div>
+    <div class="tile"><span class="label">Received · ${fyName(fyY)}</span><b class="num">${inr(F.rec)}</b><small class="${F.out>0?"err":""}">${F.out>0?`${inr(F.out)} still to collect`:"nothing pending"}</small></div>
+    <div class="tile"><span class="label">Upcoming bookings</span><b class="num">${inr(U.rev)}</b><small>${U.n} confirmed, not started</small></div>
+  </div>
+  <div class="rep-grid">
+    <section class="pcard"><h3>Month by month · ${fyName(fyY)}${car?` · ${esc(car.plate||"")}`:""}</h3>
+      <div class="mtable" role="table" aria-label="Revenue by month">
+        <div class="mrow mhead" role="row"><span role="columnheader">Month</span><span role="columnheader">Trips</span><span role="columnheader">Days</span><span role="columnheader" class="r">Revenue</span></div>
+        ${months.map(m=>`<button class="mrow ${m.k===month?"on":""}" role="row" data-repmonth="${m.k}"><span role="cell">${m.label}</span><span role="cell" class="num">${m.n||"–"}</span><span role="cell" class="num">${m.days||"–"}</span><span role="cell" class="r num">${m.rev?inr(m.rev):"–"}<i class="bar" style="width:${Math.round(m.rev/maxRev*100)}%"></i></span></button>`).join("")}
+        <div class="mrow mfoot" role="row"><span role="cell">Total</span><span role="cell" class="num">${F.n}</span><span role="cell" class="num">${F.days}</span><span role="cell" class="r num">${inr(F.rev)}</span></div>
+      </div>
+    </section>
+    ${perCar.length?`<section class="pcard"><h3>By car · ${fyName(fyY)}</h3>
+      <div class="mtable">
+        <div class="mrow mhead"><span>Car</span><span>Trips</span><span>Days</span><span class="r">Revenue</span></div>
+        ${perCar.map(x=>`<button class="mrow" data-repcar="${esc(x.c.id)}"><span><span class="plate">${esc(x.c.plate||x.c.id)}</span></span><span class="num">${x.n||"–"}</span><span class="num">${x.days||"–"}</span><span class="r num">${x.rev?inr(x.rev):"–"}<i class="bar" style="width:${Math.round(x.rev/maxCar*100)}%"></i></span></button>`).join("")}
+      </div></section>`:""}
+  </div>
+  <div class="head-row" style="margin-top:18px;align-items:center">
+    <h3 style="font-size:17px;margin:0">Bookings${car?` · ${esc(car.plate||"")} ${esc(car.make_model||"")}`:""}</h3>
+    <div class="actions">${S.downloads?`<button class="btn sm primary" data-act="rep-export">Export sheet (CSV)</button>`:""}</div>
+  </div>
+  <div class="filters" role="group" aria-label="Period">
+    ${[["month",monthName(month)],["fy",fyName(fyY)],["all","All time"]].map(([k,l])=>`<button class="chip" aria-pressed="${range===k}" data-reprange="${k}">${esc(l)}</button>`).join("")}
+  </div>
+  <div class="list">${list.length? list.map(b=>{ const L=ledger(b); const st=STATUS[b.status]||STATUS.draft; const c2=carOf(b)||{};
+      return `<button class="row rrow" data-open="${esc(b.id)}">
+        <span class="who"><b>${esc(b.name||"")}</b><small>${esc(fmtD(b.pickup))} → ${esc(fmtD(b.drop))} · ${L.c.days} day${L.c.days===1?"":"s"}${car?"":` · ${esc(c2.plate||"")}`}</small></span>
+        <span class="amt num">${inr(L.total)}<br><small class="${L.balance>0&&EARNED.includes(b.status)?"err":"muted"}">${L.balance>0&&EARNED.includes(b.status)?`${inr(L.balance)} due`:`paid ${inr(L.settled)}`}</small></span>
+        <span class="st"><span class="pill ${st.cls}">${st.label}</span></span>
+      </button>`; }).join("") : `<div class="empty">No bookings in ${esc(R.rangeLabel)}.</div>`}</div>`;
+}
+function csvCell(v){ const s=String(v??""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; }
+function exportRevenueCsv(){
+  const R=revModel();
+  const head=["Booking ID","Status","Car","Plate","Customer","Mobile","Pickup","Drop-off","Days","Daily rate","Rental","Delivery","Extra charges","Invoice total","Received","Balance","Security deposit","Invoice no."];
+  const dt=s=>{ const d=new Date(s); return isNaN(d)?"":`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const rows=R.list.map(b=>{ const L=ledger(b), c=carOf(b)||{}; return [b.id,(STATUS[b.status]||{}).label||b.status,c.make_model||"",c.plate||"",b.name||"",b.phone||"",dt(b.pickup),dt(b.drop),L.c.days,Number(b.rate)||0,L.c.rental,L.c.delivery,L.extrasTotal,L.total,L.settled,L.balance,depShort(b).replace("₹",""),b.invoice?.no||""]; });
+  const earned=R.list.filter(b=>EARNED.includes(b.status)); const T=sumUp(earned);
+  rows.push([]); rows.push(["Total (trips started)","","","","","","","",T.days,"","","","",T.rev,T.rec,T.out,"",""]);
+  const csv="﻿"+[head,...rows].map(r=>r.map(csvCell).join(",")).join("\r\n");
+  const who = R.car ? (R.car.plate||"car").replace(/\s+/g,"") : "All-cars";
+  return { filename:`DriveKaro-Revenue-${who}-${R.rangeLabel.replace(/\s+/g,"-")}.csv`, blob:new Blob([csv],{type:"text/csv"}) };
+}
+
 async function saveBooking(asDraft){
   const f=readForm();
   const errsFull=validate({...f,id:S.editId},true);
@@ -1672,7 +1804,7 @@ async function nextInvoiceNo(){
 }
 function summaryText(b){
   const car=carOf(b)||{}; const c=calc(b); const s=S.settings;
-  return [`*${s.business_name} booking ${b.id}*`,`Name: ${b.name}`,`Car: ${car.make_model||""} (${car.plate||""})`,`Pickup: ${fmtDT(b.pickup)}`,`Drop-off: ${fmtDT(b.drop)}`,`Pickup point: ${b.location||s.designated_location}`,`Duration: ${durText(c)}`,`Rental: ${inr(c.rental)}`,...(c.delivery?[`Delivery: ${inr(c.delivery)}`]:[]),`Refundable deposit: ${inr(c.deposit)}`,`Total before handover: ${inr(c.collected)}`,`Includes ${c.km} km. Extra ${money(b,"extra_km")}/km.`,`Please carry your original driving licence. Your rental agreement will come for Aadhaar eSign before pickup.`,`Questions: ${s.support_phone}`].join("\n");
+  return [`*${s.business_name} booking ${b.id}*`,`Name: ${b.name}`,`Car: ${car.make_model||""} (${car.plate||""})`,`Pickup: ${fmtDT(b.pickup)}`,`Drop-off: ${fmtDT(b.drop)}`,`Pickup point: ${b.location||s.designated_location}`,`Duration: ${durText(c)}`,`Rental: ${inr(c.rental)}`,...(c.delivery?[`Delivery: ${inr(c.delivery)}`]:[]),depType(b)==="cash"?`Refundable deposit: ${inr(c.deposit)}`:`Security deposit: ${depShort(b)} (returned after the trip)`,`Total before handover: ${inr(c.collected)}`,`Includes ${c.km} km. Extra ${money(b,"extra_km")}/km.`,`Please carry your original driving licence. Your rental agreement will come for Aadhaar eSign before pickup.`,`Questions: ${s.support_phone}`].join("\n");
 }
 function agreementText(b){
   const A=buildAgreement(b); const out=[`SELF-DRIVE VEHICLE RENTAL AGREEMENT`,`${S.settings.legal_name} | Agreement No. ${b.id} | Template v2.0`,""];
@@ -1688,6 +1820,9 @@ document.addEventListener("click", async e=>{
   const t=e.target.closest("button"); if(!t) return;
   if(t.classList.contains("tab")){ const keepDraft = t.dataset.view==="new" && !S.editId; S.view=t.dataset.view; S.selected=null; S.carEdit=null; S.carView=null; S.custView=null; S.custEdit=null; S.confirmDelete=null; if(!keepDraft){ S.editId=null; S.draft=null; } render(); window.scrollTo(0,0); return; }
   if(t.dataset.pickcar){ pickCar(t.dataset.pickcar); return; }
+  if(t.dataset.repcar){ S.repCar=t.dataset.repcar; S.view="revenue"; render(); return; }
+  if(t.dataset.repmonth){ S.repMonth=t.dataset.repmonth; S.repRange="month"; render(); return; }
+  if(t.dataset.reprange){ S.repRange=t.dataset.reprange; render(); return; }
   if(t.dataset.pickcust){ const c=custById(t.dataset.pickcust); if(c) applyCustomer(c); return; }
   if(t.dataset.webcust){ startNewCustomer(t.dataset.webcust, t.dataset.name, t.dataset.email); return; }
   if(t.dataset.newcust){ startNewCustomer(t.dataset.newcust); return; }
@@ -1712,6 +1847,12 @@ document.addEventListener("click", async e=>{
     case "keep": S.confirmDelete=null; render(); break;
     case "delete": { const id=S.selected; if(await remove("bookings/"+id)){ S.bookings=S.bookings.filter(x=>x.id!==id); S.selected=null; S.confirmDelete=null; render(); toast("Booking deleted."); } break; }
     case "copy-wa": if(b) copy(summaryText(b),"Booking summary copied. Paste it in WhatsApp."); break;
+    case "rep-export": {
+      try{ const {filename, blob}=exportRevenueCsv(); await S.downloads.save({filename, data:blob}); }
+      catch(err){ if(err && err.code==="declined") break; toast("Couldn't export. Try again."); }
+      break; }
+    case "car-revenue": S.repCar=t.dataset.car; S.repRange="all"; S.view="revenue"; S.carView=null; render(); window.scrollTo(0,0); break;
+    case "dep-return": { if(b && await patchBooking(b,{dep_returned_at: b.dep_returned_at ? "" : new Date().toISOString()})) toast(b.dep_returned_at?"Marked as not returned.":"Security marked returned."); break; }
     case "esign-send": {
       if(!b || S.esignBusy) break;
       if(b.esign?.document_id && !S.confirmResend){ S.confirmResend=true; toast("Tap again to send a new request. This uses Leegality credits again."); setTimeout(()=>S.confirmResend=false,6000); break; }
@@ -1786,7 +1927,7 @@ document.addEventListener("click", async e=>{
       break;
     }
     case "cust-change": clearCustomer(); break;
-    case "cust-fields": { const f=$("#custfields"); f.hidden=!f.hidden; if(!f.hidden) $("#f_name").focus(); break; }
+    case "cust-fields": { const f=$("#custfields"); f.hidden=!f.hidden; const bt=$("#cc_edit"); if(bt) bt.textContent=f.hidden?"Edit":"Hide details"; if(!f.hidden) $("#f_name").focus(); break; }
     case "add-customer": S.custEdit="new"; S.newCustPhone=""; render(); window.scrollTo(0,0); break;
     case "edit-cust": S.custEdit=S.custView; render(); window.scrollTo(0,0); break;
     case "close-cust": S.custView=null; render(); break;
@@ -1822,6 +1963,8 @@ document.addEventListener("mousedown", e=>{ if(e.target.closest(".dd")) e.preven
 document.addEventListener("keydown", e=>{ if(e.target.id==="f_phone" && e.key==="Enter"){ e.preventDefault(); const first=$("#custdd .dd-row"); if(first) first.click(); } if(e.key==="Escape"){ const dd=$("#custdd"); if(dd) dd.hidden=true; } });
 document.addEventListener("change", e=>{
   if(e.target.id==="f_pickup"||e.target.id==="f_drop") refreshCarOptions();
+  if(e.target.id==="f_deptype") showDepFields();
+  if(e.target.id==="rep_month" && e.target.value){ S.repMonth=e.target.value; S.repRange="month"; render(); return; }
   if(e.target.id==="f_car"){ const car=S.fleet.find(c=>c.id===e.target.value); if(car){ const r=$("#f_rate"), d=$("#f_deposit"); if(r && (!r.value || r.dataset.auto)){ r.value=car.rate||""; r.dataset.auto="1"; } if(d && (!d.value || d.dataset.auto)){ d.value=car.deposit??""; d.dataset.auto="1"; } } }
   if(e.target.id==="f_rate"||e.target.id==="f_deposit") delete e.target.dataset.auto;
   if(e.target.closest("#bform")) updateSummary();

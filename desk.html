@@ -352,6 +352,33 @@ details.more summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--a
 .signers{display:flex;flex-direction:column;gap:6px;margin:6px 0 4px}
 .signer{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--surface-2);border-radius:8px;padding:8px 10px}
 .signer small{display:block;font-size:12px}
+
+/* compact customer card */
+.custcard{align-items:center}
+.cc-main{min-width:0;display:flex;flex-direction:column;gap:2px}
+.cc-main .muted{font-size:13px}
+.cc-links{display:flex;gap:14px;flex-wrap:wrap}
+.linkbtn{background:none;border:0;padding:4px 0;font:600 13.5px var(--f-body);color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+/* revenue */
+.carchips{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px}
+.carchips .chip{white-space:nowrap}
+.rep-controls{display:flex;flex-wrap:wrap;gap:12px 20px;margin-bottom:14px}
+.rep-controls .field{max-width:220px}
+.rep-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;align-items:start}
+.mtable{display:flex;flex-direction:column}
+.mrow{display:grid;grid-template-columns:minmax(0,1.2fr) 52px 52px minmax(0,1.6fr);gap:8px;align-items:center;padding:8px 6px;border:0;border-top:1px solid var(--line);background:none;text-align:left;font:inherit;color:inherit;width:100%}
+button.mrow{cursor:pointer}
+button.mrow:hover{background:var(--surface-2)}
+.mrow.on{background:var(--accent-soft)}
+.mhead{border-top:0;font:500 11px/1.2 var(--f-mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.mfoot{font-weight:700;border-top:1.5px solid var(--ink)}
+.mrow .r{text-align:right;position:relative}
+.mrow .bar{display:block;height:4px;border-radius:2px;background:var(--accent);margin:4px 0 0 auto;min-width:0}
+.row.rrow{grid-template-columns:minmax(0,1fr) auto auto}
+@media (max-width:760px){
+  .row.rrow{grid-template-columns:1fr auto;grid-template-areas:"who amt" "st st"}
+  .row.rrow .who{grid-area:who}.row.rrow .amt{grid-area:amt}.row.rrow .st{grid-area:st;text-align:left}
+}
 </style>
 </head>
 <body>
@@ -375,6 +402,7 @@ details.more summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--a
     <button class="tab" data-view="bookings" id="t-bookings">Bookings</button>
     <button class="tab" data-view="new" id="t-new">+ New</button>
     <button class="tab" data-view="customers" id="t-customers">Customers</button>
+    <button class="tab" data-view="revenue" id="t-revenue">Revenue</button>
     <button class="tab" data-view="fleet" id="t-fleet">Fleet</button>
     <button class="tab" data-view="settings" id="t-settings">Settings</button>
   </nav>
