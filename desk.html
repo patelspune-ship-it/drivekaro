@@ -347,6 +347,11 @@ details.more summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--a
 .docrow{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--line)}
 .doc-name{font-size:12.5px;overflow-wrap:anywhere}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* eSign */
+.signers{display:flex;flex-direction:column;gap:6px;margin:6px 0 4px}
+.signer{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--surface-2);border-radius:8px;padding:8px 10px}
+.signer small{display:block;font-size:12px}
 </style>
 </head>
 <body>
@@ -363,7 +368,7 @@ details.more summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--a
 <div class="wrap" id="app" hidden>
   <header class="top">
     <div class="brand"><h1>Drive<b>Karo</b></h1><span>Booking desk</span></div>
-    <div class="esign" title="Agreements go out for Aadhaar eSign once the Leegality account is connected"><i class="dot"></i>Aadhaar eSign · manual via Leegality</div>
+    <div class="esign" title="Agreements go out for Aadhaar eSign once the Leegality account is connected"><i class="dot"></i>Aadhaar eSign · Leegality</div>
     <button class="btn sm" id="signout" type="button">Sign out</button>
   </header>
   <nav class="tabs" aria-label="Sections">

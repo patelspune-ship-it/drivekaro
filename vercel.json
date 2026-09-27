@@ -1,7 +1,16 @@
 {
   "rewrites": [
-    { "source": "/desk", "destination": "/desk.html" },
-    { "source": "/desk/(.*)", "destination": "/desk.html" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/desk",
+      "destination": "/desk.html"
+    },
+    {
+      "source": "/desk/(.*)",
+      "destination": "/desk.html"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ]
 }

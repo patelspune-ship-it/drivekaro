@@ -546,11 +546,12 @@ function agreementHTML(b){
 
 /* ---------- PDF ---------- */
 function pdfSafe(t){ return String(t).replace(/₹\s?/g,"Rs. ").replace(/[—–]/g,"-").replace(/[“”]/g,'"').replace(/[‘’]/g,"'").replace(/·/g,"|").replace(/[^\x00-\xFF]/g,""); }
-function buildPdf(b){
+function buildPdf(b, opts={}){
   const {jsPDF} = window.jspdf; const doc=new jsPDF({unit:"mm",format:"a4"});
   const s=S.settings, A=buildAgreement(b);
   const W=210, M=18, CW=W-2*M; let y=M;
-  const ensure = hNeed => { if(y+hNeed>297-18){ doc.addPage(); y=M; } };
+  const BOTTOM = opts.esign ? 297-44 : 297-18;
+  const ensure = hNeed => { if(y+hNeed>BOTTOM){ doc.addPage(); y=M; } };
   const text = (t,size,style,x=M,w=CW,lh=1.45) => { doc.setFont("helvetica",style); doc.setFontSize(size); const lines=doc.splitTextToSize(pdfSafe(t),w); const step=size*0.3528*lh; for(const ln of lines){ ensure(step); doc.text(ln,x,y+step*0.8); y+=step; } };
   text("SELF-DRIVE VEHICLE RENTAL AGREEMENT",15,"bold"); y+=1;
   text(`${s.legal_name} | Agreement No. ${b.id} | Template v2.0`,9.5,"normal"); y+=3;
@@ -585,7 +586,8 @@ function buildPdf(b){
     }
   }
   const n=doc.getNumberOfPages();
-  for(let i=1;i<=n;i++){ doc.setPage(i); doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(120); doc.text(pdfSafe(`${s.legal_name} | ${s.support_phone} | Agreement ${b.id}`),M,297-9); doc.text(`Page ${i} of ${n}`,W-M,297-9,{align:"right"}); doc.setTextColor(0); }
+  for(let i=1;i<=n;i++){ doc.setPage(i); doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(120);
+    if(opts.esign){ doc.setDrawColor(210); doc.line(M,297-42,W-M,297-42); doc.setFontSize(7.5); doc.text("Hirer's Aadhaar eSign",M,297-38.5); doc.text(pdfSafe(`For ${s.legal_name}`),W-M,297-38.5,{align:"right"}); doc.setFontSize(8); } doc.text(pdfSafe(`${s.legal_name} | ${s.support_phone} | Agreement ${b.id}`),M,297-9); doc.text(`Page ${i} of ${n}`,W-M,297-9,{align:"right"}); doc.setTextColor(0); }
   return doc.output("blob");
 }
 
@@ -920,14 +922,55 @@ function viewDetail(){
     </div>
   </div>`;
 }
+/* ---------- Aadhaar eSign (Leegality) ---------- */
+async function api(path, payload){
+  const { data:{ session } } = await supabase.auth.getSession();
+  let r;
+  try{ r = await fetch(path,{ method:"POST", headers:{ "Content-Type":"application/json", Authorization:"Bearer "+(session?.access_token||"") }, body:JSON.stringify(payload) }); }
+  catch(e){ throw new Error("No connection. Check your internet and try again."); }
+  let j={}; try{ j=await r.json(); }catch(e){}
+  if(!r.ok) throw new Error(j.error || `Server error (${r.status}). Try again.`);
+  return j;
+}
+function blobToBase64(blob){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(String(fr.result).split(",")[1]||""); fr.onerror=()=>rej(new Error("Couldn't read the PDF.")); fr.readAsDataURL(blob); }); }
+function signLinkText(b, url){ return `Hello ${b.name}, please sign your ${S.settings.business_name} rental agreement (${b.id}) with Aadhaar OTP:\n${url}\n\nIt takes 2 minutes. Keep the mobile number linked to your Aadhaar handy for the OTP.\n\n${S.settings.support_phone}`; }
+function esignNotice(b){
+  const e=b.esign; if(!e?.last_error || !["rejected","expired"].includes(e.state)) return "";
+  return `<div class="errors" style="margin:0 0 10px">${esc(e.last_error)} Fix anything needed, then send again.</div>`;
+}
+function esignPanelHTML(b){
+  const e=b.esign||{}; const inv=e.invitees||[];
+  const cust=inv.find(i=>i.role==="customer")||inv[0];
+  const last=(e.events||[]).slice(-1)[0];
+  return `<p style="margin:0 0 8px;font-size:14px">Sent for Aadhaar eSign ${e.sent_at?esc(fmtDT(e.sent_at)):""}${e.env==="sandbox"?` <span class="pill s-sent">Sandbox test</span>`:""}</p>
+    <div class="signers">${inv.map(i=>`<div class="signer"><span><b>${esc(i.name||"")}</b><small class="muted">${i.role==="customer"?"Customer":"DriveKaro"}</small></span><span class="pill ${i.signed?"s-signed":i.rejected?"s-cancelled":"s-sent"}">${i.signed?"Signed":i.rejected?"Rejected":"Waiting"}</span></div>`).join("")}</div>
+    ${e.last_error?`<div class="warnline" style="margin:8px 0">${esc(e.last_error)}</div>`:""}
+    ${last?`<p class="muted" style="font-size:12.5px;margin:6px 0 10px">Last update: ${esc([last.name,last.action||last.documentStatus].filter(Boolean).join(" · "))}, ${esc(fmtDT(last.at))}</p>`:""}
+    <div class="actions">
+      ${cust && cust.sign_url && !cust.signed ? waButton(b.phone, signLinkText(b, cust.sign_url), "WhatsApp signing link", "btn primary") : ""}
+      ${cust && cust.sign_url && !cust.signed ? `<button class="btn" data-act="copy-signlink" data-url="${esc(cust.sign_url)}">Copy link</button>`:""}
+      <button class="btn" data-act="esign-refresh" ${S.esignBusy?"disabled":""}>${S.esignBusy?"Checking…":"Refresh status"}</button>
+    </div>
+    ${inv.find(i=>i.role==="owner" && !i.signed && i.sign_url) && cust?.signed ? `<p class="note" style="margin:10px 0 0">Customer has signed. Now sign for DriveKaro: <a href="${esc(inv.find(i=>i.role==="owner").sign_url)}" target="_blank" rel="noopener">open your signing link</a>.</p>`:""}
+    <details class="more"><summary>Problems? Send again or record manually</summary>
+      <div class="actions" style="margin-top:10px"><button class="btn" data-act="esign-send" ${S.esignBusy?"disabled":""}>Send a new signing request</button><button class="btn" data-act="status" data-to="signed">Mark as signed manually</button></div>
+      <p class="note" style="margin:10px 0 0">Sending again creates a new Leegality document and uses credits again.</p></details>`;
+}
+function signedFilesHTML(b){
+  const f=b.esign?.files||{};
+  if(!f.signed) return `<p class="note" style="margin:0 0 10px">Signed on Leegality${b.esign?.file_error?`, but the signed PDF couldn't be saved yet (${esc(b.esign.file_error)})`:""}. <button class="btn sm" data-act="esign-refresh">Fetch signed PDF</button></p>`;
+  return `<div class="actions" style="margin-bottom:10px"><button class="btn" data-act="esign-file" data-type="signed">Signed agreement PDF</button>${f.audit?`<button class="btn" data-act="esign-file" data-type="audit">Audit trail</button>`:""}</div>`;
+}
+
 function nextStep(b, missing){
   if(b.status==="draft") return `<p style="margin:0 0 10px;font-size:14px">Fill the missing details to make the agreement ready for signing.</p><button class="btn primary" data-act="edit">Complete details</button>`;
-  if(b.status==="ready") return `<p style="margin:0 0 10px;font-size:14px">Send the agreement to ${esc(b.name)} for Aadhaar OTP signing.</p><div class="actions">${S.downloads&&window.jspdf?`<button class="btn" data-act="pdf">Save agreement PDF</button>`:""}</div>
-    <p class="note" style="margin:10px 0">Upload this PDF in your Leegality dashboard with ${esc(b.name)} and yourself as signers. Then record it here.</p>
-    ${fieldHTML("es_doc","Leegality document ID (optional)",b.esign_doc_id||"")}
-    <div class="actions" style="margin-top:10px"><button class="btn primary" data-act="mark-sent">Mark as sent for eSign</button></div>`;
-  if(b.status==="sent") return `<p style="margin:0 0 10px;font-size:14px">Waiting for signatures${b.esign_doc_id?` on Leegality document ${esc(b.esign_doc_id)}`:""}. Mark it signed only after Leegality shows every signer as signed and you have the signed PDF.</p><div class="actions"><button class="btn primary" data-act="status" data-to="signed">Mark as signed</button><button class="btn" data-act="status" data-to="ready">Back to ready</button></div>`;
-  if(b.status==="signed") return `<p style="margin:0 0 10px;font-size:14px">Check the original DL, take handover photos, record odometer and fuel, then hand over the keys.</p><button class="btn primary" data-act="status" data-to="handed">Mark car handed over</button>`;
+  if(b.status==="ready") return `${esignNotice(b)}<p style="margin:0 0 10px;font-size:14px">Send the agreement to ${esc(b.name)} for Aadhaar OTP signing through Leegality.</p>
+    <div class="actions"><button class="btn primary" data-act="esign-send" ${S.esignBusy?"disabled":""}>${S.esignBusy?"Sending…":"Send for Aadhaar eSign"}</button>${S.downloads&&window.jspdf?`<button class="btn" data-act="pdf">Save agreement PDF</button>`:""}</div>
+    <details class="more"><summary>Signed outside the desk? Record it manually</summary>
+      ${fieldHTML("es_doc","Leegality document ID (optional)",b.esign_doc_id||"")}
+      <div class="actions" style="margin-top:10px"><button class="btn" data-act="mark-sent">Mark as sent for eSign</button></div></details>`;
+  if(b.status==="sent") return b.esign?.document_id ? esignPanelHTML(b) : `<p style="margin:0 0 10px;font-size:14px">Waiting for signatures${b.esign_doc_id?` on Leegality document ${esc(b.esign_doc_id)}`:""}. Mark it signed only after Leegality shows every signer as signed.</p><div class="actions"><button class="btn primary" data-act="status" data-to="signed">Mark as signed</button><button class="btn" data-act="status" data-to="ready">Back to ready</button></div>`;
+  if(b.status==="signed") return `${b.esign?.document_id?signedFilesHTML(b):""}<p style="margin:0 0 10px;font-size:14px">Check the original DL, take handover photos, record odometer and fuel, then hand over the keys.</p><button class="btn primary" data-act="status" data-to="handed">Mark car handed over</button>`;
   if(b.status==="handed") return `<p style="margin:0 0 10px;font-size:14px">Inspect with the customer at return and settle the deposit.</p><button class="btn primary" data-act="status" data-to="returned">Mark car returned</button>`;
   if(b.status==="returned") return `<p style="margin:0;font-size:14px">Trip complete.</p>`;
   if(b.status==="cancelled") return `<button class="btn" data-act="status" data-to="${missing.length?"draft":"ready"}">Restore booking</button>`;
@@ -1669,6 +1712,32 @@ document.addEventListener("click", async e=>{
     case "keep": S.confirmDelete=null; render(); break;
     case "delete": { const id=S.selected; if(await remove("bookings/"+id)){ S.bookings=S.bookings.filter(x=>x.id!==id); S.selected=null; S.confirmDelete=null; render(); toast("Booking deleted."); } break; }
     case "copy-wa": if(b) copy(summaryText(b),"Booking summary copied. Paste it in WhatsApp."); break;
+    case "esign-send": {
+      if(!b || S.esignBusy) break;
+      if(b.esign?.document_id && !S.confirmResend){ S.confirmResend=true; toast("Tap again to send a new request. This uses Leegality credits again."); setTimeout(()=>S.confirmResend=false,6000); break; }
+      S.confirmResend=false; S.esignBusy=true; render();
+      try{
+        const blob=buildPdf(b,{esign:true}); const pdfBase64=await blobToBase64(blob);
+        const r=await api("/api/esign/send",{bookingId:b.id, pdfBase64});
+        localUpsert(S.bookings, r.booking); S.detailTab=isMobile()?"overview":S.detailTab;
+        toast("Sent for Aadhaar eSign. Share the link on WhatsApp.");
+      }catch(err){ toast(err.message); }
+      S.esignBusy=false; render(); break; }
+    case "esign-refresh": {
+      if(!b || S.esignBusy) break; S.esignBusy=true; render();
+      try{ const r=await api("/api/esign/status",{bookingId:b.id}); localUpsert(S.bookings, r.booking); toast(r.booking.status==="signed"?"Signed by everyone.":"Status updated."); }
+      catch(err){ toast(err.message); }
+      S.esignBusy=false; render(); break; }
+    case "esign-file": {
+      if(!b) break;
+      try{
+        const r=await api("/api/esign/file",{bookingId:b.id, type:t.dataset.type});
+        const f=await fetch(r.url); if(!f.ok) throw new Error("Download failed. Try again.");
+        const blob=await f.blob(); const safe=(b.name||"customer").replace(/[^a-z0-9]+/gi,"-").replace(/^-|-$/g,"");
+        await S.downloads.save({filename:`DriveKaro-${t.dataset.type==="audit"?"Audit-Trail":"Signed-Agreement"}-${b.id}-${safe}.pdf`, data:blob});
+      }catch(err){ if(err && err.code==="declined") break; toast(err.message||"Download failed."); }
+      break; }
+    case "copy-signlink": copy(t.dataset.url, "Signing link copied."); break;
     case "mark-sent": { const id=($("#es_doc")?.value||"").trim(); if(await patchBooking(b,{status:"sent", sent_at:new Date().toISOString(), esign_doc_id:id})) toast("Marked as sent for eSign."); break; }
     case "quick-pay": { $("#p_kind").value=t.dataset.kind; $("#p_amount").value=t.dataset.amount; $("#p_amount").focus(); break; }
     case "add-pay": {
