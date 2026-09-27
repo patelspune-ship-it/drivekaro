@@ -217,7 +217,7 @@ function buildAgreement(b){
     {t:"p", text:"2.2 This Agreement is a lease of the Vehicle for a limited period for the Hirer's personal use, of the kind referred to in section 51 of the Motor Vehicles Act, 1988, and a bailment under sections 148 to 171 of the Indian Contract Act, 1872. The Hirer receives only temporary possession and use. Ownership and title remain with the registered owner at all times, including for all purposes of the Motor Vehicles Act, 1988. The Hirer shall not sell, pledge, mortgage, sub-let, lend or part with possession of the Vehicle, or allow any lien or charge to arise over it."},
     {t:"p", text:"2.3 The Hirer shall take the same care of the Vehicle as a person of ordinary prudence would take of their own vehicle."},
     {t:"p", text:"2.4 The Booking Period starts at the Start Time whether or not the Hirer collects the Vehicle at that time, subject to the cancellation terms in clause 13."},
-    {t:"p", text:"2.5 The Hirer may request an extension before the End Time. An extension is valid only when DriveKaro confirms it in writing, including by WhatsApp or through its booking system, and the Hirer pays the extension Charges. Possession after the End Time without a confirmed extension is unauthorised and clause 12 applies."},
+    {t:"p", text:"2.5 The Hirer may request an extension before the End Time. An extension is valid when DriveKaro confirms the new End Time and the extension Charges in writing, including by WhatsApp message or through its booking system, and the Hirer accepts them by reply or by paying the extension Charges. No fresh agreement or signature is needed for an extension: the End Time is then the new End Time, and every term of this Agreement, including Schedule III, the Damage Limit and the insurance, liability, tracking and dispute resolution clauses, applies to the extended Booking Period. Unless the Parties agree otherwise, extension Charges are calculated at the daily rate in Schedule III. Possession after the End Time without a confirmed extension is unauthorised and clause 12 applies."},
     {t:"p", text:"2.6 The Vehicle is handed over and returned at the location stated in Schedule III (the \"Designated Location\"). Where DriveKaro agrees to deliver or collect the Vehicle elsewhere, the delivery charge in Schedule III applies and the Hirer's responsibility for the Vehicle starts at handover and ends at return."}
   ]});
   T.push({h:"3. Eligibility, Verification and Authorised Drivers", body:[
@@ -800,7 +800,7 @@ function invoiceModel(b){
   const s=S.settings, L=ledger(b), car=carOf(b)||{}, inv=b.invoice||{};
   const ext=b.extensions||[];
   const items=[[`Vehicle rental: ${car.make_model||""} (${car.plate||""}), ${L.c.baseDays} × 24 hrs at ${inr(b.rate)}`, L.c.rental-L.c.extAmt]];
-  ext.forEach(e=>items.push([`Extension (Addendum ${e.no}): ${fmtDT(e.from)} to ${fmtDT(e.to)}, ${e.days} day${e.days===1?"":"s"}`, Number(e.amount)||0]));
+  ext.forEach(e=>items.push([`Extension ${e.no}: ${fmtDT(e.from)} to ${fmtDT(e.to)}, ${e.days} day${e.days===1?"":"s"}`, Number(e.amount)||0]));
   if(L.c.delivery) items.push(["Delivery or collection", L.c.delivery]);
   L.extras.forEach(x=>items.push([`${x.label}${x.note?` (${x.note})`:""}`, Number(x.amount)||0]));
   return {s, L, car, inv, items};
@@ -979,7 +979,7 @@ function viewDetail(){
     <div class="paper-wrap">
       ${S.detailTab==="payments" ? viewPayments(b) : `
       <div class="paper-bar">
-        <div><div class="label">Agreement preview · v2.0</div>${(b.extensions||[]).length?`<div class="muted" style="font-size:13px">Shows the agreement as signed. Extensions are in the addenda.</div>`:""}${missing.length?`<div class="warnline">${missing.length} thing${missing.length>1?"s":""} to fix before signing (see Next step)</div>`:softMissing(b).length?`<div class="muted" style="font-size:13px">${softMissing(b).length} optional detail${softMissing(b).length>1?"s":""} blank</div>`:`<div class="muted" style="font-size:13px">All details filled</div>`}</div>
+        <div><div class="label">Agreement preview · v2.0</div>${(b.extensions||[]).length?`<div class="muted" style="font-size:13px">Shows the agreement as signed. Extensions are confirmed under clause 2.5 (see Extensions).</div>`:""}${missing.length?`<div class="warnline">${missing.length} thing${missing.length>1?"s":""} to fix before signing (see Next step)</div>`:softMissing(b).length?`<div class="muted" style="font-size:13px">${softMissing(b).length} optional detail${softMissing(b).length>1?"s":""} blank</div>`:`<div class="muted" style="font-size:13px">All details filled</div>`}</div>
         <div class="actions">${canDownload?`<button class="btn sm" data-act="pdf">Save PDF</button>`:""}<button class="btn sm" data-act="copy-agreement">Copy text</button></div>
       </div>
       <article class="paper">${agreementHTML(b)}</article>`}
@@ -1758,7 +1758,7 @@ function extText(b, e){
     `Car: ${car.make_model||""} (${car.plate||""})`, `Earlier drop-off: ${fmtDT(e.from)}`, `*New drop-off: ${fmtDT(e.to)}*`,
     `Extension charges: ${e.days&&e.amount===e.days*e.rate?`${e.days} day${e.days>1?"s":""} × ${inr(e.rate)} = `:""}${inr(e.amount)}`,
     e.km?`Extra km allowance: ${e.km} km`:"", L.balance>0?`Balance now due: ${inr(L.balance)}`:"",
-    ``, `All terms of your rental agreement ${b.id} continue to apply (Addendum ${e.no}). Please reply "I agree" to confirm.`,
+    ``, `This extension is confirmed under clause 2.5 of your rental agreement ${b.id}. All its terms continue to apply until the new drop-off. Please reply "I agree" to confirm.`,
     L.balance>0 && s.official_upi?`Please pay only to our UPI ID: ${s.official_upi}`:"", ``, `${s.legal_name} · ${s.support_phone}`].filter((l,i,a)=>l!==""||(a[i-1]!==""&&i>0)).join("\n");
 }
 function extFormHTML(b){
@@ -1779,13 +1779,13 @@ function extCardHTML(b){
   const pdf=S.downloads&&window.jspdf;
   return `<div class="card"><h3>Extensions</h3>
     ${x.length?`<ul class="extlist">${x.map((e,i)=>`<li>
-      <div><b>Addendum ${e.no}</b> <span class="pill ${e.accepted_at?"s-signed":"s-sent"}">${e.accepted_at?"Customer agreed":"Waiting for OK"}</span><br>
+      <div><b>Extension ${e.no}</b> <span class="pill ${e.accepted_at?"s-signed":"s-sent"}">${e.accepted_at?"Customer agreed":"Waiting for OK"}</span><br>
         <span class="num" style="font-size:14px">${esc(fmtDT(e.from))} → ${esc(fmtDT(e.to))}</span><br>
         <small class="muted">${e.days} day${e.days===1?"":"s"} · ${inr(e.amount)}${e.note?` · ${esc(e.note)}`:""}</small></div>
-      <div class="actions">${waButton(b.phone, extText(b,e), "WhatsApp", "btn sm primary")}${pdf?`<button class="btn sm" data-act="ext-pdf" data-id="${esc(e.id)}">Addendum PDF</button>`:""}
+      <div class="actions">${waButton(b.phone, extText(b,e), "WhatsApp", "btn sm primary")}${pdf?`<button class="btn sm" data-act="ext-pdf" data-id="${esc(e.id)}">PDF (optional)</button>`:""}
         <button class="btn sm" data-act="ext-accept" data-id="${esc(e.id)}">${e.accepted_at?"Undo agreed":"Customer agreed"}</button>
         ${i===x.length-1 && canExtend(b)?(S.confirmExt===e.id?`<button class="btn sm danger" data-act="ext-undo" data-id="${esc(e.id)}">Confirm remove</button><button class="btn sm" data-act="ext-keep">Keep</button>`:`<button class="btn sm" data-act="ask-ext-undo" data-id="${esc(e.id)}">Remove</button>`):""}</div>
-    </li>`).join("")}</ul>`:`<p class="muted" style="margin:0 0 10px;font-size:14px">Customer wants the car longer? Extend it here. The signed agreement stays as it is and a short addendum records the new drop-off and charges (clause 2.5).</p>`}
+    </li>`).join("")}</ul>`:`<p class="muted" style="margin:0 0 10px;font-size:14px">Customer wants the car longer? Extend it here. No new agreement or eSign is needed: clause 2.5 of the signed agreement covers extensions. Just send the WhatsApp confirmation.</p>`}
     ${canExtend(b)? (S.extForm===b.id ? extFormHTML(b) : `<button class="btn" data-act="ext-open">${x.length?"Extend again":"Extend booking"}</button>`) : ""}
   </div>`;
 }
@@ -2148,7 +2148,7 @@ document.addEventListener("click", async e=>{
       const x=b.extensions||[];
       const e={id:"e"+Date.now().toString(36), no:x.length+1, at:new Date().toISOString(), from:b.drop, to:nd, days:P.days, rate:P.rate, amount, km:P.km, note:$("#e_note").value.trim()};
       S.extForm=null;
-      if(await patchBooking(b,{extensions:[...x,e], drop:nd})) toast(`Extended to ${fmtDT(nd)}. Send the addendum on WhatsApp.`);
+      if(await patchBooking(b,{extensions:[...x,e], drop:nd})) toast(`Extended to ${fmtDT(nd)}. Send the confirmation on WhatsApp.`);
       break; }
     case "ask-ext-undo": S.confirmExt=t.dataset.id; render(); break;
     case "ext-keep": S.confirmExt=null; render(); break;
