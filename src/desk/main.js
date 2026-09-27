@@ -70,7 +70,7 @@ const IDTYPES = ["Aadhaar (masked)","Passport","Voter ID","PAN"];
 
 /* ---------- state ---------- */
 const S = {
-  fleet:[], bookings:[], customers:[], custView:null, custEdit:null, custQuery:"", confirmDoc:null, confirmCustDel:null, formCust:null, webMatches:[], settings:JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
+  fleet:[], bookings:[], customers:[], expenses:[], calMode:"week", custView:null, custEdit:null, custQuery:"", confirmDoc:null, confirmCustDel:null, formCust:null, webMatches:[], settings:JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
   view:"bookings", selected:null, filter:"active",
   editId:null, draft:null, carEdit:null, carView:null, detailTab:"agreement", confirmPay:null, confirmSettle:false, confirmDelete:null, confirmCar:null,
   db:null, dbState:"loading", downloads:null
@@ -97,8 +97,9 @@ function calc(b){
   const hours = (isNaN(p)||isNaN(d)) ? 0 : Math.max(0,(d-p)/36e5);
   const days = hours>0 ? Math.max(1, Math.ceil(hours/24 - 1e-9)) : 0;
   const rate=Number(b.rate)||0, dep=depCash(b), delivery=Number(b.with_delivery? ch(b,"delivery_charge"):0)||0;
-  const rental = days*rate;
-  return {hours, days, rental, delivery, payable:rental+delivery, deposit:dep, collected:rental+delivery+dep, km: days*(Number(ch(b,"km_per_day"))||0)};
+  const ext=b.extensions||[]; let baseDays=days, extAmt=0, rental=days*rate;
+  if(ext.length){ const bh=Math.max(0,(new Date(ext[0].from)-p)/36e5); baseDays=bh>0?Math.max(1,Math.ceil(bh/24-1e-9)):0; extAmt=ext.reduce((t,x)=>t+(Number(x.amount)||0),0); rental=baseDays*rate+extAmt; }
+  return {hours, days, baseDays, extAmt, rental, delivery, payable:rental+delivery, deposit:dep, collected:rental+delivery+dep, km: days*(Number(ch(b,"km_per_day"))||0)};
 }
 function durText(c){ if(!c.hours) return ""; const h=Math.round(c.hours); return `${c.days} day${c.days>1?"s":""} (${h} hrs)`; }
 
@@ -138,6 +139,7 @@ async function startDesk(session){
   db.collection("fleet").onSnapshot(snap=>{ setBanner(""); S.fleet = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.make_model||"").localeCompare(b.make_model||"")); softRender(); }, onErr);
   db.collection("bookings").onSnapshot(snap=>{ S.bookings = snap.docs.map(d=>({id:d.id,...d.data()})); S._bkLoaded=true; softRender(); syncCustomersFromBookings(); }, onErr);
   db.collection("customers").onSnapshot(snap=>{ S.customers = snap.docs.map(d=>({id:d.id,...d.data()})); S._custLoaded=true; softRender(); syncCustomersFromBookings(); }, onErr);
+  db.collection("expenses").onSnapshot(snap=>{ S.expenses = snap.docs.map(d=>({id:d.id,...d.data()})); softRender(); }, onErr);
   preloadDrive();
   db.doc("settings/business").onSnapshot(snap=>{ const d=snap.exists? snap.data():{}; S.settings = {...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), ...d, charges:{...DEFAULT_CHARGES, ...(d.charges||{})}}; softRender(); }, onErr);
 }
@@ -157,6 +159,8 @@ async function boot(){
   if(session) await startDesk(session); else showGate("");
 }
 function softRender(){
+  if((S.view==="revenue" && S.expForm) || (S.view==="bookings" && S.extForm)) return;
+  if(S.view==="calendar" && document.activeElement && ["cf_from","cf_to"].includes(document.activeElement.id)){ const r=$("#freeres"); if(r) r.innerHTML=freeCheckHTML(); return; }
   if(["new","settings"].includes(S.view) || S.carEdit || S.custEdit){ refreshCarOptions(); updateSummary(); return; }
   if(S.view==="customers" && !S.custView){ const l=$("#custlist"); if(l){ l.innerHTML=custListHTML(); return; } }
   if(S.view==="customers" && S.custView && ($("#doc_file")?.files?.length || S.uploading)) return;
@@ -177,6 +181,7 @@ function localUpsert(list, obj){ const i=list.findIndex(x=>x.id===obj.id); if(i>
 /* ---------- agreement model (template v2.0) ---------- */
 function V(x){ return (x===undefined||x===null||x==="") ? null : String(x); }
 function buildAgreement(b){
+  b=agreedBooking(b);
   const s=S.settings, car=carOf(b)||{}, c=calc(b), sup=s.support_phone;
   const dep = depText(b); const cashDep = depType(b)==="cash";
   const hasAddl = !!(b.addl_name||"").trim();
@@ -693,6 +698,7 @@ function render(){
   setTabs();
   if(S.view==="customers"){ $("#main").innerHTML=viewCustomers(); return; }
   if(S.view==="revenue"){ $("#main").innerHTML=viewRevenue(); return; }
+  if(S.view==="calendar"){ $("#main").innerHTML=viewCalendar(); return; }
   const m=$("#main");
   if(S.view==="bookings") m.innerHTML = S.selected ? viewDetail() : viewList();
   else if(S.view==="new"){ m.innerHTML = viewForm(); updateSummary(); }
@@ -779,7 +785,8 @@ function receiptText(b, p, L){
 function invoiceText(b){
   const s=S.settings, L=ledger(b), car=carOf(b)||{}, inv=b.invoice||{};
   const lines=[`Hello ${b.name}, thank you for choosing ${s.business_name}.`, ``, `*Invoice ${inv.no||"(draft)"}* · Booking ${b.id}`, `${car.make_model||""} (${car.plate||""})`, `${fmtDT(b.pickup)} to ${fmtDT(b.return_at||b.drop)}`, ``,
-    `Rental: ${L.c.days} day${L.c.days>1?"s":""} × ${inr(b.rate)} = ${inr(L.c.rental)}`];
+    `Rental: ${L.c.baseDays} day${L.c.baseDays>1?"s":""} × ${inr(b.rate)} = ${inr(L.c.rental-L.c.extAmt)}`];
+  (b.extensions||[]).forEach(e=>lines.push(`Extension ${e.no} (to ${fmtDT(e.to)}): ${inr(e.amount)}`));
   if(L.c.delivery) lines.push(`Delivery: ${inr(L.c.delivery)}`);
   L.extras.forEach(x=>lines.push(`${x.label}${x.note?` (${x.note})`:""}: ${inr(x.amount)}`));
   lines.push(`*Total: ${inr(L.total)}*`, `Paid: ${inr(L.settled)}`, L.balance>0?`*Balance due: ${inr(L.balance)}*`:L.balance<0?`Excess paid, to be refunded: ${inr(-L.balance)}`:`Paid in full`);
@@ -791,7 +798,9 @@ function invoiceText(b){
 }
 function invoiceModel(b){
   const s=S.settings, L=ledger(b), car=carOf(b)||{}, inv=b.invoice||{};
-  const items=[[`Vehicle rental: ${car.make_model||""} (${car.plate||""}), ${L.c.days} × 24 hrs at ${inr(b.rate)}`, L.c.rental]];
+  const ext=b.extensions||[];
+  const items=[[`Vehicle rental: ${car.make_model||""} (${car.plate||""}), ${L.c.baseDays} × 24 hrs at ${inr(b.rate)}`, L.c.rental-L.c.extAmt]];
+  ext.forEach(e=>items.push([`Extension (Addendum ${e.no}): ${fmtDT(e.from)} to ${fmtDT(e.to)}, ${e.days} day${e.days===1?"":"s"}`, Number(e.amount)||0]));
   if(L.c.delivery) items.push(["Delivery or collection", L.c.delivery]);
   L.extras.forEach(x=>items.push([`${x.label}${x.note?` (${x.note})`:""}`, Number(x.amount)||0]));
   return {s, L, car, inv, items};
@@ -940,9 +949,9 @@ function viewDetail(){
         <div class="muted" style="font-size:14px;margin-bottom:12px">${esc(car.make_model||"")} · ${esc(b.phone||"")}</div>
         <dl class="kv num">
           <dt>Pickup</dt><dd>${esc(fmtDT(b.pickup))}</dd>
-          <dt>Drop-off</dt><dd>${esc(fmtDT(b.drop))}</dd>
+          <dt>Drop-off</dt><dd>${esc(fmtDT(b.drop))}${(b.extensions||[]).length?`<br><small class="muted">extended ${b.extensions.length}×, booked till ${esc(fmtDT(b.extensions[0].from))}</small>`:""}</dd>
           <dt>Duration</dt><dd>${esc(durText(c))}</dd>
-          <dt>Rental</dt><dd>${c.days?inr(c.rental):"—"}</dd>
+          <dt>Rental</dt><dd>${c.days?inr(c.rental):"—"}${c.extAmt?`<br><small class="muted">incl. ${inr(c.extAmt)} extension</small>`:""}</dd>
           ${c.delivery?`<dt>Delivery</dt><dd>${inr(c.delivery)}</dd>`:""}
           <dt>Security deposit</dt><dd>${esc(depShort(b))}</dd>
           <dt class="total">Collect before handover</dt><dd class="total">${c.days?inr(c.collected):"—"}</dd>
@@ -954,6 +963,7 @@ function viewDetail(){
         ${b.status==="cancelled"? `<p class="muted" style="margin:0">This booking was cancelled.</p>` : `<ul class="steps">${FLOW.map((k,i)=>`<li class="${i<idx?"done":i===idx?"now":""}"><i></i>${stepLabels[k]}</li>`).join("")}</ul>`}
       </div>
       <div class="card"><h3>Next step</h3>${nextStep(b, missing)}${b.status==="draft"&&missing.length?`<div class="errors"><ul>${Object.values(vErr).map(m=>`<li>${esc(m)}</li>`).join("")}</ul></div>`:""}</div>
+      ${extCardHTML(b)}
       <div class="card">
         <div class="actions">
           <button class="btn" data-act="edit" ${["handed","returned"].includes(b.status)?"disabled":""}>Edit details and charges</button>
@@ -969,7 +979,7 @@ function viewDetail(){
     <div class="paper-wrap">
       ${S.detailTab==="payments" ? viewPayments(b) : `
       <div class="paper-bar">
-        <div><div class="label">Agreement preview · v2.0</div>${missing.length?`<div class="warnline">${missing.length} thing${missing.length>1?"s":""} to fix before signing (see Next step)</div>`:softMissing(b).length?`<div class="muted" style="font-size:13px">${softMissing(b).length} optional detail${softMissing(b).length>1?"s":""} blank</div>`:`<div class="muted" style="font-size:13px">All details filled</div>`}</div>
+        <div><div class="label">Agreement preview · v2.0</div>${(b.extensions||[]).length?`<div class="muted" style="font-size:13px">Shows the agreement as signed. Extensions are in the addenda.</div>`:""}${missing.length?`<div class="warnline">${missing.length} thing${missing.length>1?"s":""} to fix before signing (see Next step)</div>`:softMissing(b).length?`<div class="muted" style="font-size:13px">${softMissing(b).length} optional detail${softMissing(b).length>1?"s":""} blank</div>`:`<div class="muted" style="font-size:13px">All details filled</div>`}</div>
         <div class="actions">${canDownload?`<button class="btn sm" data-act="pdf">Save PDF</button>`:""}<button class="btn sm" data-act="copy-agreement">Copy text</button></div>
       </div>
       <article class="paper">${agreementHTML(b)}</article>`}
@@ -1286,7 +1296,7 @@ function viewCarProfile(c){
   return `
   <div class="head-row">
     <div><button class="btn sm" data-act="close-carview">← Fleet</button></div>
-    <div class="actions"><button class="btn" data-editcar="${esc(c.id)}">Edit car</button><button class="btn" data-act="car-revenue" data-car="${esc(c.id)}">Revenue &amp; bookings</button><button class="btn primary" data-act="book-car" data-car="${esc(c.id)}">New booking with this car</button></div>
+    <div class="actions"><button class="btn" data-editcar="${esc(c.id)}">Edit car</button><button class="btn" data-act="car-revenue" data-car="${esc(c.id)}">Revenue &amp; bookings</button><button class="btn" data-act="exp-new" data-car="${esc(c.id)}">+ Expense</button><button class="btn primary" data-act="book-car" data-car="${esc(c.id)}">New booking with this car</button></div>
   </div>
   <div class="profile">
     <div class="card profile-top">
@@ -1320,6 +1330,7 @@ function viewCarProfile(c){
         ${row("Trips completed or running", String(done.length))}
         ${row("Days rented", String(days))}
         ${row("Rental earned", inr(revenue))}
+        ${(()=>{ const x=expTotal(expFor(c.id),()=>true); return row("Expenses", inr(x))+row("Profit (rental − expenses)", `${revenue-x<0?"− ":""}${inr(Math.abs(revenue-x))}`); })()}
         ${row("Upcoming bookings", String(upcoming.filter(b=>b.status!=="handed").length))}
       </dl></div>
     </div>
@@ -1723,6 +1734,220 @@ function depFieldsHTML(g, errs){
 }
 function showDepFields(){ const t=$("#f_deptype")?.value||"cash"; document.querySelectorAll(".depf").forEach(el=>el.hidden = el.dataset.dep!==t); }
 
+/* ---------- extensions ---------- */
+// The signed agreement always shows the original booking; extensions are recorded as addenda.
+function agreedBooking(b){ const x=b.extensions||[]; return x.length ? {...b, drop:x[0].from, extensions:[]} : b; }
+function canExtend(b){ return ["signed","handed"].includes(b.status); }
+function extPreview(b, newDrop){
+  const nd=new Date(newDrop), cur=new Date(b.drop), p=new Date(b.pickup);
+  if(!newDrop || isNaN(nd)) return {err:"Choose the new drop-off date and time."};
+  if(nd<=cur) return {err:`Pick a time after the current drop-off (${fmtDT(b.drop)}).`};
+  const c=calc(b), total=Math.max(1,Math.ceil((nd-p)/864e5-1e-9)), days=Math.max(0,total-c.days), rate=Number(b.rate)||0;
+  const clash=clashFor(b.car_id, b.drop, newDrop, b.id);
+  const car=S.fleet.find(x=>x.id===b.car_id)||b.car_snapshot||{};
+  const warn=[];
+  const ins=docStatus(car.insurance_till,newDrop), puc=docStatus(car.puc_till,newDrop);
+  if(ins.bad) warn.push(`Car insurance: ${ins.label.toLowerCase()}.`);
+  if(puc.bad) warn.push(`PUC: ${puc.label.toLowerCase()}.`);
+  if(b.dl_till && new Date(b.dl_till+"T23:59")<nd) warn.push("The customer's driving licence expires before the new drop-off.");
+  return {days, amount:days*rate, rate, clash, warn, hours:Math.round((nd-cur)/36e5), km:days*(Number(ch(b,"km_per_day"))||0)};
+}
+function extText(b, e){
+  const s=S.settings, car=carOf(b)||{}, L=ledger(b);
+  return [`Hello ${b.name}, your ${s.business_name} booking ${b.id} is extended.`, ``,
+    `Car: ${car.make_model||""} (${car.plate||""})`, `Earlier drop-off: ${fmtDT(e.from)}`, `*New drop-off: ${fmtDT(e.to)}*`,
+    `Extension charges: ${e.days&&e.amount===e.days*e.rate?`${e.days} day${e.days>1?"s":""} × ${inr(e.rate)} = `:""}${inr(e.amount)}`,
+    e.km?`Extra km allowance: ${e.km} km`:"", L.balance>0?`Balance now due: ${inr(L.balance)}`:"",
+    ``, `All terms of your rental agreement ${b.id} continue to apply (Addendum ${e.no}). Please reply "I agree" to confirm.`,
+    L.balance>0 && s.official_upi?`Please pay only to our UPI ID: ${s.official_upi}`:"", ``, `${s.legal_name} · ${s.support_phone}`].filter((l,i,a)=>l!==""||(a[i-1]!==""&&i>0)).join("\n");
+}
+function extFormHTML(b){
+  const def=toLocalInput(new Date(new Date(b.drop).getTime()+864e5));
+  return `<div class="extform">
+    <div class="grid">
+      ${fieldHTML("e_drop","New drop-off",def,{type:"datetime-local",hint:`Now ${esc(fmtDT(b.drop))}`})}
+      ${fieldHTML("e_amount","Extension charges (₹)","",{type:"number",attrs:'min="0" inputmode="numeric"',hint:"Filled from the daily rate; change it if you agreed a different price."})}
+      ${fieldHTML("e_note","Note (optional)","",{hint:"e.g. asked on WhatsApp"})}
+    </div>
+    <div id="extinfo"></div>
+    <div class="actions" style="margin-top:10px"><button class="btn primary" data-act="ext-save">Save extension</button><button class="btn" data-act="ext-cancel">Cancel</button></div>
+  </div>`;
+}
+function extCardHTML(b){
+  const x=b.extensions||[];
+  if(!canExtend(b) && !x.length) return "";
+  const pdf=S.downloads&&window.jspdf;
+  return `<div class="card"><h3>Extensions</h3>
+    ${x.length?`<ul class="extlist">${x.map((e,i)=>`<li>
+      <div><b>Addendum ${e.no}</b> <span class="pill ${e.accepted_at?"s-signed":"s-sent"}">${e.accepted_at?"Customer agreed":"Waiting for OK"}</span><br>
+        <span class="num" style="font-size:14px">${esc(fmtDT(e.from))} → ${esc(fmtDT(e.to))}</span><br>
+        <small class="muted">${e.days} day${e.days===1?"":"s"} · ${inr(e.amount)}${e.note?` · ${esc(e.note)}`:""}</small></div>
+      <div class="actions">${waButton(b.phone, extText(b,e), "WhatsApp", "btn sm primary")}${pdf?`<button class="btn sm" data-act="ext-pdf" data-id="${esc(e.id)}">Addendum PDF</button>`:""}
+        <button class="btn sm" data-act="ext-accept" data-id="${esc(e.id)}">${e.accepted_at?"Undo agreed":"Customer agreed"}</button>
+        ${i===x.length-1 && canExtend(b)?(S.confirmExt===e.id?`<button class="btn sm danger" data-act="ext-undo" data-id="${esc(e.id)}">Confirm remove</button><button class="btn sm" data-act="ext-keep">Keep</button>`:`<button class="btn sm" data-act="ask-ext-undo" data-id="${esc(e.id)}">Remove</button>`):""}</div>
+    </li>`).join("")}</ul>`:`<p class="muted" style="margin:0 0 10px;font-size:14px">Customer wants the car longer? Extend it here. The signed agreement stays as it is and a short addendum records the new drop-off and charges (clause 2.5).</p>`}
+    ${canExtend(b)? (S.extForm===b.id ? extFormHTML(b) : `<button class="btn" data-act="ext-open">${x.length?"Extend again":"Extend booking"}</button>`) : ""}
+  </div>`;
+}
+function updateExtInfo(){
+  const box=$("#extinfo"); if(!box) return; const b=S.bookings.find(x=>x.id===S.selected); if(!b) return;
+  const P=extPreview(b,$("#e_drop").value); const amt=$("#e_amount");
+  if(P.err){ box.innerHTML=`<div class="err" style="margin-top:8px">${esc(P.err)}</div>`; return; }
+  if(amt && (amt.value===""||amt.dataset.auto)){ amt.value=P.amount; amt.dataset.auto="1"; }
+  box.innerHTML=`<p class="note" style="margin:10px 0 0">${P.hours} more hour${P.hours===1?"":"s"} = <b>${P.days} extra day${P.days===1?"":"s"}</b> at ${inr(P.rate)} = ${inr(P.amount)}. Extra km allowance: ${P.km} km.</p>
+    ${P.clash?`<div class="errors">This car is booked by ${esc(P.clash.name)} from ${esc(fmtDT(P.clash.pickup))}. Move that booking or pick an earlier time.</div>`:""}
+    ${P.warn.length?`<div class="errors warnbox">${P.warn.map(esc).join(" ")}</div>`:""}`;
+}
+function addendumPdf(b, e){
+  const {jsPDF}=window.jspdf; const doc=new jsPDF({unit:"mm",format:"a4"});
+  const s=S.settings, car=carOf(b)||{}; const M=18, W=210, CW=W-2*M; let y=M;
+  const t=(str,x,yy,opt)=>doc.text(pdfSafe(str),x,yy,opt);
+  const wrap=(str,w)=>doc.splitTextToSize(pdfSafe(str),w);
+  const para=(str,size=10)=>{ doc.setFontSize(size); wrap(str,CW).forEach(l=>{ t(l,M,y); y+=size*0.47; }); y+=2.5; };
+  doc.setFont("helvetica","bold"); doc.setFontSize(13); t(`ADDENDUM No. ${e.no}`,W/2,y+4,{align:"center"});
+  doc.setFontSize(10.5); t(`to Self-Drive Vehicle Rental Agreement No. ${b.id}`,W/2,y+10,{align:"center"});
+  doc.setFont("helvetica","normal"); doc.setFontSize(9.5); doc.setTextColor(90); t("Extension of the Booking Period",W/2,y+15,{align:"center"}); doc.setTextColor(0);
+  y+=24;
+  para(`This Addendum is made on ${fmtD(e.at)} at Pune between ${s.legal_name}, a sole proprietorship of Mr. ${s.signatory}, ${s.address} ("DriveKaro"), and ${b.name} ("the Hirer"). It forms part of the Self-Drive Vehicle Rental Agreement No. ${b.id} dated ${fmtD(b.agreement_date||b.created_at)} (the "Agreement"). Words defined in the Agreement have the same meaning here.`);
+  const rows=[["Vehicle",`${car.make_model||""} (${car.plate||""})`],["Start Time",fmtDT(b.pickup)],["End Time before this Addendum",fmtDT(e.from)],["New End Time",fmtDT(e.to)],
+    ["Additional period",`${e.days} day${e.days===1?"":"s"} (blocks of 24 hours)`],["Extension charges",inr(e.amount)],["Additional km allowance",`${e.km||0} km`],["Security deposit",`${depShort(b)} (unchanged)`]];
+  doc.setFontSize(10); y+=1;
+  rows.forEach(([k,v],i)=>{ if(i%2===0){ doc.setFillColor(244,241,236); doc.rect(M,y-4.3,CW,6.6,"F"); } doc.setFont("helvetica","bold"); t(k,M+2,y); doc.setFont("helvetica","normal"); t(v,M+72,y); y+=6.6; });
+  y+=5;
+  [`1. At the Hirer's request, DriveKaro extends the Booking Period under clause 2.5 of the Agreement. The Booking Period now ends at the New End Time stated above.`,
+   `2. The Hirer shall pay the extension charges to DriveKaro's official UPI ID or bank account${s.official_upi?` (UPI ${s.official_upi})`:""} on or before the End Time before this Addendum, unless DriveKaro agrees otherwise in writing.`,
+   `3. All other terms of the Agreement, including the charges in Schedule III, the Damage Limit, and the insurance, liability, tracking and dispute resolution clauses, apply to the extended Booking Period. Late return charges apply from the New End Time.`,
+   `4. The Hirer accepts this Addendum by confirming it in reply on WhatsApp or by paying the extension charges. The Parties agree that either is a valid acceptance in electronic form under section 10A of the Information Technology Act, 2000.`
+  ].forEach(p=>para(p));
+  y+=4; const bw=(CW-8)/2;
+  doc.setDrawColor(170); doc.setLineDashPattern([1,1],0); doc.roundedRect(M,y,bw,34,2,2); doc.roundedRect(M+bw+8,y,bw,34,2,2); doc.setLineDashPattern([],0);
+  doc.setFont("helvetica","bold"); doc.setFontSize(9); t("HIRER",M+4,y+6); t(`FOR ${s.legal_name}`,M+bw+12,y+6);
+  doc.setFont("helvetica","normal"); doc.setFontSize(8.5);
+  t(b.name||"",M+4,y+24);
+  t(e.accepted_at?`Accepted on ${fmtDT(e.accepted_at)} (WhatsApp / payment)`:"Accepted by WhatsApp reply / payment",M+4,y+29);
+  const im=printedSign(); if(im){ try{ doc.addImage(im, imgFormat(im), M+bw+12, y+8, 38, 12.5); }catch(err){} }
+  t(`${s.signatory}, Proprietor (authorised signatory)`,M+bw+12,y+29);
+  doc.setFontSize(8); doc.setTextColor(110); t(pdfSafe(`${s.legal_name} | ${s.support_phone} | Agreement ${b.id} | Addendum ${e.no}`),M,297-10); doc.setTextColor(0);
+  return doc.output("blob");
+}
+
+/* ---------- calendar ---------- */
+function dayStart(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
+function ymd(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function calRange(){
+  const mode=S.calMode||"week";
+  let start=S.calStart ? new Date(S.calStart+"T00:00") : dayStart(new Date());
+  if(mode==="month") start=new Date(start.getFullYear(), start.getMonth(), 1);
+  const n = mode==="week" ? 7 : new Date(start.getFullYear(), start.getMonth()+1, 0).getDate();
+  const end=new Date(start); end.setDate(end.getDate()+n);
+  return {mode, start, end, n};
+}
+function bookingEnd(b){ return b.status==="returned" && b.return_at ? b.return_at : b.drop; }
+function calCars(R){
+  const inRange=b=>b.status!=="cancelled" && new Date(b.pickup)<R.end && new Date(bookingEnd(b))>R.start;
+  const cars=S.fleet.filter(c=>c.active!==false || S.bookings.some(b=>b.car_id===c.id && inRange(b)));
+  return cars.map(c=>({c, list:S.bookings.filter(b=>b.car_id===c.id && inRange(b)).sort((a,b)=>new Date(a.pickup)-new Date(b.pickup))}));
+}
+function freeCheckHTML(){
+  const f=S.calFrom, t=S.calTo;
+  if(!f||!t) return `<p class="muted" style="margin:10px 0 0;font-size:13.5px">Enter pickup and drop-off to see which cars are free.</p>`;
+  if(new Date(t)<=new Date(f)) return `<div class="err" style="margin-top:8px">Drop-off must be after pickup.</div>`;
+  const cars=S.fleet.filter(c=>c.active!==false);
+  if(!cars.length) return `<p class="muted" style="margin:10px 0 0">No cars in Fleet yet.</p>`;
+  const rows=cars.map(c=>({c, clash:clashFor(c.id,f,t,null)})).sort((a,b)=>(!!a.clash)-(!!b.clash));
+  const nFree=rows.filter(r=>!r.clash).length;
+  return `<p style="margin:12px 0 8px;font-size:14px"><b>${nFree} of ${rows.length}</b> car${rows.length>1?"s":""} free from ${esc(fmtDT(f))} to ${esc(fmtDT(t))}.</p>
+    <div class="freelist">${rows.map(({c,clash})=>`<div class="freerow"><span class="plate">${esc(c.plate)}</span><span class="fr-name"><b>${esc(c.make_model)}</b><small class="${clash?"bad":"ok"}">${clash?`Booked by ${esc(clash.name||"")} till ${esc(fmtDT(clash.drop))}`:`Free · ${inr(c.rate)}/day`}</small></span>
+      ${clash?`<button class="btn sm" data-open="${esc(clash.id)}">Open</button>`:`<button class="btn sm primary" data-act="cal-book" data-car="${esc(c.id)}">Book</button>`}</div>`).join("")}</div>`;
+}
+function viewCalendar(){
+  const R=calRange(); const today=ymd(new Date());
+  const days=[...Array(R.n)].map((_,i)=>{ const d=new Date(R.start); d.setDate(d.getDate()+i); return d; });
+  const span=R.end-R.start;
+  const label = R.mode==="week" ? `${fmtD(ymd(days[0]))} – ${fmtD(ymd(days[R.n-1]))}` : `${MONTHS[R.start.getMonth()]} ${R.start.getFullYear()}`;
+  const WD=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  const rows=calCars(R);
+  return `
+  <div class="head-row"><div><h2>Calendar</h2><div class="muted" style="font-size:14px">Tap a free day to start a booking with that car. Tap a bar to open the booking.</div></div></div>
+  <section class="pcard"><h3>Which cars are free?</h3>
+    <div class="grid">
+      ${fieldHTML("cf_from","Pickup",S.calFrom||"",{type:"datetime-local"})}
+      ${fieldHTML("cf_to","Drop-off",S.calTo||"",{type:"datetime-local"})}
+    </div>
+    <div id="freeres">${freeCheckHTML()}</div>
+  </section>
+  <div class="calnav">
+    <div class="filters" role="group" aria-label="View" style="margin:0">${[["week","Week"],["month","Month"]].map(([k,l])=>`<button class="chip" aria-pressed="${R.mode===k}" data-calmode="${k}">${l}</button>`).join("")}</div>
+    <div class="actions"><button class="btn sm" data-calnav="-1" aria-label="Previous ${R.mode}">‹</button><button class="btn sm" data-calnav="0">Today</button><button class="btn sm" data-calnav="1" aria-label="Next ${R.mode}">›</button></div>
+    <b class="cal-label">${esc(label)}</b>
+  </div>
+  ${rows.length?`<div class="cal ${R.mode}" style="--n:${R.n}"><div class="cal-inner">
+    <div class="calrow head"><div class="callabel"><span class="label">Car</span></div><div class="caltrack">${days.map(d=>`<div class="calhead ${ymd(d)===today?"today":""} ${[0,6].includes(d.getDay())?"we":""}">${R.mode==="week"?WD[d.getDay()]:WD[d.getDay()][0]}<b>${d.getDate()}</b></div>`).join("")}</div></div>
+    ${rows.map(({c,list})=>`<div class="calrow"><div class="callabel"><span class="plate">${esc(c.plate)}</span><small>${esc((c.make_model||"").split(" ").slice(0,2).join(" "))}</small></div>
+      <div class="caltrack">${days.map(d=>`<button class="calcell ${ymd(d)===today?"today":""} ${[0,6].includes(d.getDay())?"we":""}" data-calbook="${esc(c.id)}|${ymd(d)}" aria-label="Book ${esc(c.plate)} on ${esc(fmtD(ymd(d)))}"></button>`).join("")}
+        ${list.map(b=>{ const p=Math.max(0,(new Date(b.pickup)-R.start)/span), q=Math.min(1,(new Date(bookingEnd(b))-R.start)/span); const st=STATUS[b.status]||STATUS.draft;
+          return `<button class="calbar st-${esc(b.status)}" style="left:${(p*100).toFixed(3)}%;width:${Math.max(0.8,(q-p)*100).toFixed(3)}%" data-open="${esc(b.id)}" title="${esc(`${b.name||""} · ${fmtDT(b.pickup)} to ${fmtDT(bookingEnd(b))} · ${st.label}`)}"><span>${esc((b.name||"Booking").split(" ")[0])}</span></button>`; }).join("")}
+      </div></div>`).join("")}
+  </div></div>
+  <div class="legend"><span><i class="st-handed"></i>Car out</span><span><i class="st-signed"></i>Signed</span><span><i class="st-ready"></i>Agreement ready / sent</span><span><i class="st-draft"></i>Draft</span><span><i class="st-returned"></i>Returned</span></div>`
+  : `<div class="list"><div class="empty"><h3>No cars yet</h3>Add your cars in Fleet to see the calendar.</div></div>`}`;
+}
+function startBookingFor(carId, pickup, drop){
+  const car=S.fleet.find(c=>c.id===carId); if(!car) return;
+  S.editId=null; S.draft={car_id:car.id, rate:car.rate, deposit:car.deposit, pickup, drop}; S.view="new"; S.selected=null; render(); window.scrollTo(0,0);
+}
+
+/* ---------- expenses ---------- */
+const EXP_CATS=["EMI","Insurance","Service","Repair","Accident repair","Tyres / battery","PUC / permit / tax","Cleaning","Parking","FASTag / toll","Fuel","GPS / tracker","Other"];
+// Month keys ("YYYY-MM") an expense counts in. Monthly ones repeat up to their last month or the current month.
+function expMonths(e){
+  const k=ym((e.date||"")+"T00:00"); if(!k) return [];
+  if(e.repeat!=="monthly") return [k];
+  const last=[e.until||"9999-12", ym(new Date())].sort()[0];
+  const out=[]; let [y,m]=k.split("-").map(Number);
+  for(let i=0;i<600;i++){ const kk=`${y}-${pad(m)}`; if(kk>last) break; out.push(kk); m++; if(m>12){ m=1; y++; } }
+  return out;
+}
+function expFor(carId){ return (S.expenses||[]).filter(e=>!carId || carId==="all" || e.car_id===carId); }
+function expTotal(list, test){ let t=0; for(const e of list) for(const k of expMonths(e)) if(test(k)) t+=Number(e.amount)||0; return t; }
+function fyOfKey(k){ return fyStartYear(new Date(k+"-01T00:00")); }
+function expTest(R){ return R.range==="month" ? k=>k===R.month : R.range==="fy" ? k=>fyOfKey(k)===R.fyY : ()=>true; }
+function expCarName(id){ if(!id) return "Business (all cars)"; const c=S.fleet.find(x=>x.id===id) || S.bookings.find(b=>b.car_id===id)?.car_snapshot; return c ? `${c.plate||""} · ${c.make_model||""}` : "Removed car"; }
+function expFormHTML(){
+  const car = S.expForm?.car ?? (S.repCar && S.repCar!=="all" ? S.repCar : "");
+  return `<section class="pcard" id="expform"><h3>Add expense</h3><div class="grid">
+    ${selectHTML("ex_car","Car",car,[["","Business (not one car)"],...S.fleet.map(c=>[c.id,`${c.plate} · ${c.make_model}`])])}
+    ${selectHTML("ex_cat","Type","Service",EXP_CATS.map(c=>[c,c]))}
+    ${fieldHTML("ex_amt","Amount (₹)","",{type:"number",attrs:'min="1" inputmode="numeric"'})}
+    ${fieldHTML("ex_date","Date",ymd(new Date()),{type:"date"})}
+    ${selectHTML("ex_rep","Repeats","",[["","One time"],["monthly","Every month"]],{hint:"Use Every month for EMI, parking rent, tracker fees."})}
+    <div class="field" id="ex_untilf" hidden><label for="ex_until">Last month (optional)</label><input id="ex_until" type="month"><span class="hint">E.g. the last EMI month. Blank = keeps going.</span></div>
+    ${fieldHTML("ex_note","Details","",{wide:1,hint:"E.g. 20,000 km service, bill no."})}
+  </div><div id="experr"></div>
+  <div class="actions" style="margin-top:10px"><button class="btn primary" data-act="exp-save">Save expense</button><button class="btn" data-act="exp-cancel">Cancel</button></div></section>`;
+}
+function expListHTML(R){
+  const test=expTest(R);
+  const list=expFor(S.repCar).map(e=>{ const ks=expMonths(e).filter(test); return {e, n:ks.length, amt:ks.length*(Number(e.amount)||0)}; }).filter(x=>x.n).sort((a,b)=>String(b.e.date).localeCompare(String(a.e.date)));
+  if(!list.length) return `<div class="list"><div class="empty">No expenses in ${esc(R.rangeLabel)}. Add service, repairs, EMI and insurance to see profit.</div></div>`;
+  return `<div class="list">${list.map(({e,n,amt})=>`<div class="row exprow">
+    <span class="who"><b>${esc(e.category)}${e.repeat==="monthly"?` <span class="pill s-ready">${inr(e.amount)} / month</span>`:""}</b><small>${esc(fmtD(e.date))}${e.repeat==="monthly"?(e.until?` to ${esc(monthName(e.until))}`:" onwards"):""} · ${esc(expCarName(e.car_id))}${e.note?` · ${esc(e.note)}`:""}</small></span>
+    <span class="amt num">${inr(amt)}${n>1?`<br><small class="muted">${n} months</small>`:""}</span>
+    <span class="rowact">${e.repeat==="monthly"&&!e.until?`<button class="btn sm" data-act="exp-stop" data-id="${esc(e.id)}">Stop repeating</button>`:""}${S.confirmExp===e.id?`<button class="btn sm danger" data-act="exp-del" data-id="${esc(e.id)}">Confirm delete</button><button class="btn sm" data-act="exp-keep">Keep</button>`:`<button class="btn sm" data-act="exp-ask-del" data-id="${esc(e.id)}">Delete</button>`}</span>
+  </div>`).join("")}</div>`;
+}
+function exportExpensesCsv(){
+  const R=revModel(); const test=expTest(R);
+  const head=["Month","Date","Car","Type","Details","Repeats","Amount"];
+  const rows=[]; let total=0;
+  for(const e of expFor(S.repCar)) for(const k of expMonths(e).filter(test)){ const amt=Number(e.amount)||0; total+=amt; rows.push([k, e.repeat==="monthly"?`${k}-${String(e.date).slice(8,10)}`:e.date, expCarName(e.car_id), e.category, e.note||"", e.repeat==="monthly"?"Every month":"One time", amt]); }
+  rows.sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+  rows.push([]); rows.push(["Total","","","","","",total]);
+  const csv="﻿"+[head,...rows].map(r=>r.map(csvCell).join(",")).join("\r\n");
+  const who = R.car ? (R.car.plate||"car").replace(/\s+/g,"") : "All-cars";
+  return { filename:`DriveKaro-Expenses-${who}-${R.rangeLabel.replace(/\s+/g,"-")}.csv`, blob:new Blob([csv],{type:"text/csv"}) };
+}
+
 /* ---------- revenue ---------- */
 const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const EARNED=["handed","returned"], UPCOMING=["ready","sent","signed"];
@@ -1748,15 +1973,20 @@ function revModel(){
 function viewRevenue(){
   const R=revModel(); const {car, month, fyY, earned, inFY, list, range}=R;
   const M=sumUp(earned.filter(b=>ym(b.pickup)===month)), F=sumUp(earned.filter(inFY));
+  const EX=expFor(S.repCar), inFYk=k=>fyOfKey(k)===fyY;
+  const Mx=expTotal(EX,k=>k===month), Fx=expTotal(EX,inFYk), Mp=M.rev-Mx, Fp=F.rev-Fx;
   const now=new Date(); const U=sumUp(R.all.filter(b=>UPCOMING.includes(b.status) && new Date(b.drop)>=now));
-  const months=[...Array(12)].map((_,i)=>{ const d=new Date(fyY,3+i,1); const k=ym(d); return {k, label:`${MONTHS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, ...sumUp(earned.filter(b=>ym(b.pickup)===k))}; });
+  const months=[...Array(12)].map((_,i)=>{ const d=new Date(fyY,3+i,1); const k=ym(d); const u=sumUp(earned.filter(b=>ym(b.pickup)===k)), x=expTotal(EX,kk=>kk===k); return {k, label:`${MONTHS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, ...u, exp:x, profit:u.rev-x}; });
   const maxRev=Math.max(1,...months.map(m=>m.rev));
   const cars=[...S.fleet];
   S.bookings.forEach(b=>{ if(b.car_id && !cars.some(c=>c.id===b.car_id) && b.car_snapshot) cars.push({id:b.car_id, ...b.car_snapshot, removed:true}); });
-  const perCar = (!S.repCar||S.repCar==="all") ? cars.map(c=>({c, ...sumUp(earned.filter(b=>b.car_id===c.id && inFY(b)))})).sort((a,b)=>b.rev-a.rev) : [];
+  const perCar = (!S.repCar||S.repCar==="all") ? cars.map(c=>{ const u=sumUp(earned.filter(b=>b.car_id===c.id && inFY(b))), x=expTotal(expFor(c.id),inFYk); return {c, ...u, exp:x, profit:u.rev-x}; }).sort((a,b)=>b.profit-a.profit) : [];
+  const genExp = (!S.repCar||S.repCar==="all") ? expTotal((S.expenses||[]).filter(e=>!e.car_id),inFYk) : 0;
+  const pf = v => `<span class="${v<0?"neg":""}">${v<0?"− ":""}${inr(Math.abs(v))}</span>`;
   const maxCar=Math.max(1,...perCar.map(x=>x.rev));
   return `
-  <div class="head-row"><div><h2>Revenue</h2><div class="muted" style="font-size:14px">Revenue counts trips that have started (car handed over or returned), by pickup date. Deposits are not revenue.</div></div></div>
+  <div class="head-row"><div><h2>Revenue &amp; profit</h2><div class="muted" style="font-size:14px">Revenue counts trips that have started (car handed over or returned), by pickup date. Deposits are not revenue. Profit = revenue − expenses.</div></div><button class="btn primary" data-act="exp-new">+ Add expense</button></div>
+  ${S.expForm?expFormHTML():""}
   <div class="carchips" role="group" aria-label="Car">
     <button class="chip" aria-pressed="${!S.repCar||S.repCar==="all"}" data-repcar="all">All cars</button>
     ${cars.map(c=>`<button class="chip" aria-pressed="${S.repCar===c.id}" data-repcar="${esc(c.id)}"><span class="num">${esc(c.plate||c.id)}</span> · ${esc((c.make_model||"").split(" ").slice(0,2).join(" "))}</button>`).join("")}
@@ -1766,23 +1996,26 @@ function viewRevenue(){
     <div class="muted" style="font-size:13px;align-self:end;padding-bottom:10px">Financial year: <b>${fyName(fyY)}</b> (Apr–Mar)</div>
   </div>
   <div class="money">
-    <div class="tile"><span class="label">${esc(monthName(month))}</span><b class="num">${inr(M.rev)}</b><small>${M.n} trip${M.n===1?"":"s"} · ${M.days} day${M.days===1?"":"s"}</small></div>
-    <div class="tile"><span class="label">${fyName(fyY)}</span><b class="num">${inr(F.rev)}</b><small>${F.n} trip${F.n===1?"":"s"} · ${F.days} days</small></div>
+    <div class="tile"><span class="label">Revenue · ${esc(monthName(month))}</span><b class="num">${inr(M.rev)}</b><small>${M.n} trip${M.n===1?"":"s"} · ${M.days} day${M.days===1?"":"s"}</small></div>
+    <div class="tile"><span class="label">Expenses · ${esc(monthName(month))}</span><b class="num">${inr(Mx)}</b><small>service, EMI, repairs…</small></div>
+    <div class="tile ${Mp<0?"t-bad":"t-ok"}"><span class="label">Profit · ${esc(monthName(month))}</span><b class="num">${pf(Mp)}</b><small>revenue − expenses</small></div>
+    <div class="tile ${Fp<0?"t-bad":"t-ok"}"><span class="label">Profit · ${fyName(fyY)}</span><b class="num">${pf(Fp)}</b><small>${inr(F.rev)} revenue − ${inr(Fx)} expenses</small></div>
     <div class="tile"><span class="label">Received · ${fyName(fyY)}</span><b class="num">${inr(F.rec)}</b><small class="${F.out>0?"err":""}">${F.out>0?`${inr(F.out)} still to collect`:"nothing pending"}</small></div>
     <div class="tile"><span class="label">Upcoming bookings</span><b class="num">${inr(U.rev)}</b><small>${U.n} confirmed, not started</small></div>
   </div>
   <div class="rep-grid">
     <section class="pcard"><h3>Month by month · ${fyName(fyY)}${car?` · ${esc(car.plate||"")}`:""}</h3>
-      <div class="mtable" role="table" aria-label="Revenue by month">
-        <div class="mrow mhead" role="row"><span role="columnheader">Month</span><span role="columnheader">Trips</span><span role="columnheader">Days</span><span role="columnheader" class="r">Revenue</span></div>
-        ${months.map(m=>`<button class="mrow ${m.k===month?"on":""}" role="row" data-repmonth="${m.k}"><span role="cell">${m.label}</span><span role="cell" class="num">${m.n||"–"}</span><span role="cell" class="num">${m.days||"–"}</span><span role="cell" class="r num">${m.rev?inr(m.rev):"–"}<i class="bar" style="width:${Math.round(m.rev/maxRev*100)}%"></i></span></button>`).join("")}
-        <div class="mrow mfoot" role="row"><span role="cell">Total</span><span role="cell" class="num">${F.n}</span><span role="cell" class="num">${F.days}</span><span role="cell" class="r num">${inr(F.rev)}</span></div>
+      <div class="mtable m4" role="table" aria-label="Revenue, expenses and profit by month">
+        <div class="mrow mhead" role="row"><span role="columnheader">Month</span><span role="columnheader" class="r">Revenue</span><span role="columnheader" class="r">Expenses</span><span role="columnheader" class="r">Profit</span></div>
+        ${months.map(m=>`<button class="mrow ${m.k===month?"on":""}" role="row" data-repmonth="${m.k}"><span role="cell">${m.label}<small class="muted">${m.n?`${m.n} trip${m.n===1?"":"s"}`:""}</small></span><span role="cell" class="r num">${m.rev?inr(m.rev):"–"}<i class="bar" style="width:${Math.round(m.rev/maxRev*100)}%"></i></span><span role="cell" class="r num">${m.exp?inr(m.exp):"–"}</span><span role="cell" class="r num b">${m.rev||m.exp?pf(m.profit):"–"}</span></button>`).join("")}
+        <div class="mrow mfoot" role="row"><span role="cell">Total</span><span role="cell" class="r num">${inr(F.rev)}</span><span role="cell" class="r num">${inr(Fx)}</span><span role="cell" class="r num">${pf(Fp)}</span></div>
       </div>
     </section>
     ${perCar.length?`<section class="pcard"><h3>By car · ${fyName(fyY)}</h3>
-      <div class="mtable">
-        <div class="mrow mhead"><span>Car</span><span>Trips</span><span>Days</span><span class="r">Revenue</span></div>
-        ${perCar.map(x=>`<button class="mrow" data-repcar="${esc(x.c.id)}"><span><span class="plate">${esc(x.c.plate||x.c.id)}</span></span><span class="num">${x.n||"–"}</span><span class="num">${x.days||"–"}</span><span class="r num">${x.rev?inr(x.rev):"–"}<i class="bar" style="width:${Math.round(x.rev/maxCar*100)}%"></i></span></button>`).join("")}
+      <div class="mtable m4">
+        <div class="mrow mhead"><span>Car</span><span class="r">Revenue</span><span class="r">Expenses</span><span class="r">Profit</span></div>
+        ${perCar.map(x=>`<button class="mrow" data-repcar="${esc(x.c.id)}"><span><span class="plate">${esc(x.c.plate||x.c.id)}</span><small class="muted">${x.n?`${x.n} trip${x.n===1?"":"s"} · ${x.days} d`:""}</small></span><span class="r num">${x.rev?inr(x.rev):"–"}<i class="bar" style="width:${Math.round(x.rev/maxCar*100)}%"></i></span><span class="r num">${x.exp?inr(x.exp):"–"}</span><span class="r num b">${x.rev||x.exp?pf(x.profit):"–"}</span></button>`).join("")}
+        ${genExp?`<div class="mrow"><span>Business<small class="muted">not one car</small></span><span class="r num">–</span><span class="r num">${inr(genExp)}</span><span class="r num b">${pf(-genExp)}</span></div>`:""}
       </div></section>`:""}
   </div>
   <div class="head-row" style="margin-top:18px;align-items:center">
@@ -1797,7 +2030,12 @@ function viewRevenue(){
         <span class="who"><b>${esc(b.name||"")}</b><small>${esc(fmtD(b.pickup))} → ${esc(fmtD(b.drop))} · ${L.c.days} day${L.c.days===1?"":"s"}${car?"":` · ${esc(c2.plate||"")}`}</small></span>
         <span class="amt num">${inr(L.total)}<br><small class="${L.balance>0&&EARNED.includes(b.status)?"err":"muted"}">${L.balance>0&&EARNED.includes(b.status)?`${inr(L.balance)} due`:`paid ${inr(L.settled)}`}</small></span>
         <span class="st"><span class="pill ${st.cls}">${st.label}</span></span>
-      </button>`; }).join("") : `<div class="empty">No bookings in ${esc(R.rangeLabel)}.</div>`}</div>`;
+      </button>`; }).join("") : `<div class="empty">No bookings in ${esc(R.rangeLabel)}.</div>`}</div>
+  <div class="head-row" style="margin-top:18px;align-items:center">
+    <h3 style="font-size:17px;margin:0">Expenses · ${esc(R.rangeLabel)}${car?` · ${esc(car.plate||"")}`:""} <span class="num" style="font-weight:400">${inr(expTotal(EX,expTest(R)))}</span></h3>
+    <div class="actions"><button class="btn sm primary" data-act="exp-new">+ Add expense</button>${S.downloads?`<button class="btn sm" data-act="exp-export">Export expenses (CSV)</button>`:""}</div>
+  </div>
+  ${expListHTML(R)}`;
 }
 function csvCell(v){ const s=String(v??""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; }
 function exportRevenueCsv(){
@@ -1807,6 +2045,8 @@ function exportRevenueCsv(){
   const rows=R.list.map(b=>{ const L=ledger(b), c=carOf(b)||{}; return [b.id,(STATUS[b.status]||{}).label||b.status,c.make_model||"",c.plate||"",b.name||"",b.phone||"",dt(b.pickup),dt(b.drop),L.c.days,Number(b.rate)||0,L.c.rental,L.c.delivery,L.extrasTotal,L.total,L.settled,L.balance,depShort(b).replace("₹",""),b.invoice?.no||""]; });
   const earned=R.list.filter(b=>EARNED.includes(b.status)); const T=sumUp(earned);
   rows.push([]); rows.push(["Total (trips started)","","","","","","","",T.days,"","","","",T.rev,T.rec,T.out,"",""]);
+  const X=expTotal(expFor(S.repCar),expTest(R));
+  rows.push(["Expenses (same period)","","","","","","","","","","","","",X]); rows.push(["Profit","","","","","","","","","","","","",T.rev-X]);
   const csv="﻿"+[head,...rows].map(r=>r.map(csvCell).join(",")).join("\r\n");
   const who = R.car ? (R.car.plate||"car").replace(/\s+/g,"") : "All-cars";
   return { filename:`DriveKaro-Revenue-${who}-${R.rangeLabel.replace(/\s+/g,"-")}.csv`, blob:new Blob([csv],{type:"text/csv"}) };
@@ -1875,8 +2115,11 @@ async function copy(text, done){
 document.addEventListener("click", async e=>{
   if(e.target.closest('[data-act="sign-remove"]')){ if(confirm("Remove your saved signature?")) saveSignSettings({owner_sign:""},"Signature removed."); return; }
   const t=e.target.closest("button"); if(!t) return;
-  if(t.classList.contains("tab")){ const keepDraft = t.dataset.view==="new" && !S.editId; S.view=t.dataset.view; S.selected=null; S.carEdit=null; S.carView=null; S.custView=null; S.custEdit=null; S.confirmDelete=null; if(!keepDraft){ S.editId=null; S.draft=null; } render(); window.scrollTo(0,0); return; }
+  if(t.classList.contains("tab")){ const keepDraft = t.dataset.view==="new" && !S.editId; S.view=t.dataset.view; S.selected=null; S.carEdit=null; S.carView=null; S.custView=null; S.custEdit=null; S.confirmDelete=null; S.extForm=null; S.expForm=null; if(!keepDraft){ S.editId=null; S.draft=null; } render(); window.scrollTo(0,0); return; }
   if(t.dataset.pickcar){ pickCar(t.dataset.pickcar); return; }
+  if(t.dataset.calmode){ S.calMode=t.dataset.calmode; render(); return; }
+  if(t.dataset.calnav!==undefined){ const n=Number(t.dataset.calnav); if(!n){ S.calStart=null; } else { const R=calRange(); const d=new Date(R.start); if(R.mode==="week") d.setDate(d.getDate()+7*n); else d.setMonth(d.getMonth()+n); S.calStart=ymd(d); } render(); return; }
+  if(t.dataset.calbook){ const [carId,day]=t.dataset.calbook.split("|"); const d=new Date(day+"T10:00"); const n=new Date(d); n.setDate(n.getDate()+1); startBookingFor(carId, `${day}T10:00`, `${ymd(n)}T10:00`); return; }
   if(t.dataset.repcar){ S.repCar=t.dataset.repcar; S.view="revenue"; render(); return; }
   if(t.dataset.repmonth){ S.repMonth=t.dataset.repmonth; S.repRange="month"; render(); return; }
   if(t.dataset.reprange){ S.repRange=t.dataset.reprange; render(); return; }
@@ -1887,12 +2130,55 @@ document.addEventListener("click", async e=>{
   if(t.dataset.carview){ if(t.dataset.keepdraft && !S.editId) S.draft=readForm(); S.view="fleet"; S.carView=t.dataset.carview; S.carEdit=null; render(); window.scrollTo(0,0); return; }
   if(t.dataset.filter){ S.filter=t.dataset.filter; render(); return; }
   if(t.dataset.dtab){ S.detailTab=t.dataset.dtab; render(); return; }
-  if(t.dataset.open){ S.view="bookings"; S.detailTab=isMobile()?"overview":"agreement"; S.confirmPay=null; S.confirmSettle=false; S.selected=t.dataset.open; S.confirmDelete=null; render(); window.scrollTo(0,0); return; }
+  if(t.dataset.open){ S.extForm=null; S.view="bookings"; S.detailTab=isMobile()?"overview":"agreement"; S.confirmPay=null; S.confirmSettle=false; S.selected=t.dataset.open; S.confirmDelete=null; render(); window.scrollTo(0,0); return; }
   if(t.dataset.editcar){ S.carEdit=t.dataset.editcar; S.confirmCar=false; render(); return; }
   const act=t.dataset.act; if(!act) return;
   const b = S.selected ? S.bookings.find(x=>x.id===S.selected) : null;
   switch(act){
     case "new": S.editId=null; S.draft=null; S.view="new"; render(); break;
+    case "cal-book": startBookingFor(t.dataset.car, S.calFrom, S.calTo); break;
+    case "ext-open": S.extForm=b.id; render(); updateExtInfo(); $("#e_drop")?.focus(); break;
+    case "ext-cancel": S.extForm=null; render(); break;
+    case "ext-save": {
+      const nd=$("#e_drop").value; const P=extPreview(b,nd);
+      if(P.err){ updateExtInfo(); break; }
+      if(P.clash){ updateExtInfo(); toast(`Clashes with ${P.clash.name}'s booking.`); break; }
+      const av=$("#e_amount").value, amount=Number(av);
+      if(av==="" || !(amount>=0)){ toast("Enter the extension charges (0 if free)."); $("#e_amount").focus(); break; }
+      const x=b.extensions||[];
+      const e={id:"e"+Date.now().toString(36), no:x.length+1, at:new Date().toISOString(), from:b.drop, to:nd, days:P.days, rate:P.rate, amount, km:P.km, note:$("#e_note").value.trim()};
+      S.extForm=null;
+      if(await patchBooking(b,{extensions:[...x,e], drop:nd})) toast(`Extended to ${fmtDT(nd)}. Send the addendum on WhatsApp.`);
+      break; }
+    case "ask-ext-undo": S.confirmExt=t.dataset.id; render(); break;
+    case "ext-keep": S.confirmExt=null; render(); break;
+    case "ext-undo": { S.confirmExt=null; const x=b.extensions||[]; const last=x[x.length-1]; if(!last||last.id!==t.dataset.id) break;
+      if(await patchBooking(b,{extensions:x.slice(0,-1), drop:last.from})) toast(`Extension removed. Drop-off is back to ${fmtDT(last.from)}.`); break; }
+    case "ext-accept": { const x=(b.extensions||[]).map(e=>e.id===t.dataset.id?{...e, accepted_at:e.accepted_at?"":new Date().toISOString()}:e); if(await patchBooking(b,{extensions:x})) toast("Updated."); break; }
+    case "ext-pdf": {
+      const e=(b?.extensions||[]).find(x=>x.id===t.dataset.id); if(!e||!S.downloads) break;
+      try{ const safe=(b.name||"customer").replace(/[^a-z0-9]+/gi,"-").replace(/^-|-$/g,""); await S.downloads.save({filename:`DriveKaro-Addendum-${e.no}-${b.id}-${safe}.pdf`, data:addendumPdf(b,e)}); }
+      catch(err){ if(err && err.code==="declined") break; toast("Couldn't build the addendum PDF."); }
+      break; }
+    case "exp-new": { S.expForm={car:t.dataset.car ?? (S.repCar&&S.repCar!=="all"?S.repCar:"")}; if(t.dataset.car){ S.repCar=t.dataset.car; S.carView=null; } S.view="revenue"; render(); const f=$("#expform"); if(f){ f.scrollIntoView({block:"start"}); } $("#ex_amt")?.focus(); break; }
+    case "exp-cancel": S.expForm=null; render(); break;
+    case "exp-save": {
+      const v=id=>($("#"+id)?.value??"").trim(); const amt=Number(v("ex_amt"));
+      const errs=[]; if(!(amt>0)) errs.push("Enter an amount above zero."); if(!v("ex_date")) errs.push("Enter the date.");
+      if(v("ex_rep")==="monthly" && v("ex_until") && v("ex_until")<v("ex_date").slice(0,7)) errs.push("The last month is before the first month.");
+      if(errs.length){ $("#experr").innerHTML=`<div class="errors">${errs.map(esc).join("<br>")}</div>`; break; }
+      const id="EX-"+Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,5).toUpperCase();
+      const doc={id, car_id:v("ex_car"), category:v("ex_cat"), amount:amt, date:v("ex_date"), repeat:v("ex_rep"), until:v("ex_rep")==="monthly"?v("ex_until"):"", note:v("ex_note"), created_at:new Date().toISOString()};
+      if(!(await write("expenses/"+id, doc))) break;
+      localUpsert(S.expenses, doc); S.expForm=null; render(); toast(`${doc.category} ${inr(amt)} saved.`); break; }
+    case "exp-ask-del": S.confirmExp=t.dataset.id; render(); break;
+    case "exp-keep": S.confirmExp=null; render(); break;
+    case "exp-del": { const id=t.dataset.id; S.confirmExp=null; if(await remove("expenses/"+id)){ S.expenses=S.expenses.filter(x=>x.id!==id); render(); toast("Expense deleted."); } break; }
+    case "exp-stop": { const e=S.expenses.find(x=>x.id===t.dataset.id); if(!e) break; const doc={...e, until:ym(new Date())}; if(await write("expenses/"+e.id, doc)){ localUpsert(S.expenses, doc); render(); toast(`Stops after ${monthName(doc.until)}.`); } break; }
+    case "exp-export": {
+      try{ const {filename, blob}=exportExpensesCsv(); await S.downloads.save({filename, data:blob}); }
+      catch(err){ if(err && err.code==="declined") break; toast("Couldn't export. Try again."); }
+      break; }
     case "back": S.selected=null; S.confirmDelete=null; render(); break;
     case "edit": S.editId=S.selected; S.draft=null; S.view="new"; render(); window.scrollTo(0,0); break;
     case "cancel-edit": S.view="bookings"; S.editId=null; S.draft=null; render(); break;
@@ -2012,6 +2298,8 @@ document.addEventListener("input", e=>{
   if(e.target.id==="f_phone") onPhoneInput();
   if(e.target.id==="cust_q"){ S.custQuery=e.target.value; const l=$("#custlist"); if(l) l.innerHTML=custListHTML(); return; }
   if(e.target.id==="doc_type") S.docType=e.target.value;
+  if(e.target.id==="e_drop") updateExtInfo();
+  if(e.target.id==="e_amount") delete e.target.dataset.auto;
   if(e.target.closest("#bform")) updateSummary();
 });
 document.addEventListener("focusin", e=>{ if(e.target.id==="f_phone") renderCustDropdown(); });
@@ -2021,6 +2309,12 @@ document.addEventListener("keydown", e=>{ if(e.target.id==="f_phone" && e.key===
 document.addEventListener("change", e=>{
   if(e.target.id==="f_pickup"||e.target.id==="f_drop") refreshCarOptions();
   if(e.target.id==="f_deptype") showDepFields();
+  if(e.target.id==="cf_from"||e.target.id==="cf_to"){ S[e.target.id==="cf_from"?"calFrom":"calTo"]=e.target.value;
+    if(e.target.id==="cf_from" && e.target.value && (!S.calTo || S.calTo<=e.target.value)){ const d=new Date(e.target.value); d.setDate(d.getDate()+1); S.calTo=toLocalInput(d); const to=$("#cf_to"); if(to) to.value=S.calTo; }
+    const r=$("#freeres"); if(r) r.innerHTML=freeCheckHTML(); return; }
+  if(e.target.id==="ex_rep"){ const f=$("#ex_untilf"); if(f) f.hidden=e.target.value!=="monthly"; }
+  if(e.target.id==="ex_cat" && e.target.value==="EMI"){ const r=$("#ex_rep"); if(r && !r.value){ r.value="monthly"; const f=$("#ex_untilf"); if(f) f.hidden=false; } }
+  if(e.target.id==="e_drop") updateExtInfo();
   if(e.target.id==="s_signmode"){ saveSignSettings({owner_sign_mode:e.target.value}, e.target.value==="printed"?"Only the customer will get the eSign link.":"DriveKaro will also sign by Aadhaar eSign."); return; }
   if(e.target.id==="s_signfile" && e.target.files?.[0]){ const f=e.target.files[0]; cleanSignature(f).then(url=>saveSignSettings({owner_sign:url, owner_sign_mode:"printed"},"Signature saved. It will print on new agreements.")).catch(err=>toast(err.message||"Could not read that photo.")); return; }
   if(e.target.id==="rep_month" && e.target.value){ S.repMonth=e.target.value; S.repRange="month"; render(); return; }
