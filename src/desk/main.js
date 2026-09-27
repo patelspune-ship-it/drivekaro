@@ -4,6 +4,8 @@
 import { supabase } from "../supabaseClient.js";
 import { jsPDF } from "jspdf";
 import { createStore } from "./store.js";
+import QRCode from "qrcode";
+import { daySummary, summaryText as daySummaryText, serviceStatus, serviceLabel, carOdometer, upiLink, payUrl, dueNow, fmtTime } from "./summary.js";
 import { configureDrive, driveConfigured, driveConnected, preloadDrive, connectDrive, ensureCustomerFolder, shrinkImage, uploadFile, trashFile, folderUrl } from "./drive.js";
 
 configureDrive(import.meta.env.VITE_GOOGLE_CLIENT_ID);
@@ -694,7 +696,8 @@ function softNote(b){
 
 /* ---------- views ---------- */
 function setTabs(){ document.querySelectorAll(".tab").forEach(t=>t.setAttribute("aria-current", t.dataset.view===S.view?"page":"false")); }
-function render(){
+function render(){ renderView(); fillQRs(); }
+function renderView(){
   setTabs();
   if(S.view==="customers"){ $("#main").innerHTML=viewCustomers(); return; }
   if(S.view==="revenue"){ $("#main").innerHTML=viewRevenue(); return; }
@@ -720,6 +723,7 @@ function viewList(){
     </div>
     <button class="btn primary" data-act="new">+ New booking</button>
   </div>
+  ${todayHTML()}
   <div class="filters" role="group" aria-label="Filter bookings">
     ${[["active","Open"],["all","All"],["returned","Returned"],["cancelled","Cancelled"]].map(([k,l])=>`<button class="chip" aria-pressed="${S.filter===k}" data-filter="${k}">${l}</button>`).join("")}
   </div>
@@ -792,7 +796,7 @@ function invoiceText(b){
   lines.push(`*Total: ${inr(L.total)}*`, `Paid: ${inr(L.settled)}`, L.balance>0?`*Balance due: ${inr(L.balance)}*`:L.balance<0?`Excess paid, to be refunded: ${inr(-L.balance)}`:`Paid in full`);
   if(depType(b)!=="cash") lines.push(``, `Security deposit: ${depShort(b)} (${b.dep_returned_at?"returned":"held"})`);
   if(L.depIn) lines.push(``, `Security deposit: received ${inr(L.depIn)}${L.depUsed?`, adjusted ${inr(L.depUsed)}`:""}${L.depOut?`, refunded ${inr(L.depOut)}`:""}${L.depHeld>0?`, held ${inr(L.depHeld)}`:""}`);
-  if(L.balance>0 && s.official_upi) lines.push(``, `Please pay only to our UPI ID: ${s.official_upi}`);
+  if(L.balance>0 && s.official_upi) lines.push(``, `Pay online: ${payLinkFor(b,L.balance)}`, `Please pay only to our UPI ID: ${s.official_upi}`);
   lines.push(``, `${s.legal_name} · ${s.support_phone}`);
   return lines.join("\n");
 }
@@ -821,11 +825,12 @@ function invoiceHTML(b){
     ${L.balance<=0?`<p class="inv-stamp">${L.balance<0?"EXCESS PAID":"PAID IN FULL"}</p>`:""}
     ${depType(b)!=="cash"?`<p><b>Security deposit:</b> ${esc(depShort(b))}, ${b.dep_returned_at?"returned":"held by DriveKaro"}. Not part of the invoice amount.</p>`:""}
     ${L.depIn?`<p><b>Security deposit:</b> received ${inr(L.depIn)}${L.depUsed?`; adjusted against charges ${inr(L.depUsed)}`:""}${L.depOut?`; refunded ${inr(L.depOut)}`:""}; ${L.depHeld>0?`held ${inr(L.depHeld)}`:"fully settled"}. The deposit is not part of the invoice amount.</p>`:""}
+    ${L.balance>0&&s.official_upi?`<div class="inv-qr"><img data-qr="${esc(upiFor(b,L.balance))}" alt="UPI QR code" width="110" height="110"><div><b>Scan to pay ${inr(L.balance)}</b><br>UPI ID ${esc(s.official_upi)}<br><span style="font-size:12px">or open ${esc(payLinkFor(b,L.balance))}</span></div></div>`:""}
     ${L.balance>0&&(s.official_upi||s.official_bank)?`<p><b>Pay only to:</b> ${esc([s.official_upi&&"UPI "+s.official_upi, s.official_bank&&"Bank "+s.official_bank].filter(Boolean).join(" · "))}</p>`:""}
     <p class="inv-foot">${esc(s.legal_name)} is not registered under GST; no GST has been charged. This invoice is issued under the rental agreement ${esc(b.id)}.</p>
   </div>`;
 }
-function invoicePdf(b){
+function invoicePdf(b, qr){
   const {jsPDF}=window.jspdf; const doc=new jsPDF({unit:"mm",format:"a4"});
   const {s,L,car,inv,items}=invoiceModel(b); const M=18, W=210, CW=W-2*M; let y=M;
   const t=(str,x,yy,opt)=>doc.text(pdfSafe(str),x,yy,opt);
@@ -850,6 +855,7 @@ function invoicePdf(b){
   doc.setFont("helvetica","normal");
   if(depType(b)!=="cash"){ wrap(`Security deposit: ${depShort(b)}, ${b.dep_returned_at?"returned":"held by DriveKaro"}. Not part of the invoice amount.`,CW).forEach(l=>{ t(l,M,y); y+=4.5; }); y+=2; }
   if(L.depIn){ wrap(`Security deposit: received ${inr(L.depIn)}${L.depUsed?`; adjusted against charges ${inr(L.depUsed)}`:""}${L.depOut?`; refunded ${inr(L.depOut)}`:""}; ${L.depHeld>0?`held ${inr(L.depHeld)}`:"fully settled"}. The deposit is not part of the invoice amount.`,CW).forEach(l=>{ t(l,M,y); y+=4.5; }); y+=2; }
+  if(L.balance>0 && qr){ if(y>297-60){ doc.addPage(); y=M; } try{ doc.addImage(qr,"PNG",M,y,32,32); }catch(e){} doc.setFont("helvetica","bold"); t(`Scan to pay ${inr(L.balance)}`,M+37,y+8); doc.setFont("helvetica","normal"); t(`UPI ID ${s.official_upi}`,M+37,y+14); doc.setFontSize(8); t(payLinkFor(b,L.balance),M+37,y+20); doc.setFontSize(9); y+=38; }
   if(L.balance>0&&(s.official_upi||s.official_bank)){ t(`Pay only to: ${[s.official_upi&&"UPI "+s.official_upi, s.official_bank&&"Bank "+s.official_bank].filter(Boolean).join(" | ")}`,M,y); y+=6; }
   doc.setFontSize(8); doc.setTextColor(110); wrap(`${s.legal_name} is not registered under GST; no GST has been charged. This invoice is issued under the rental agreement ${b.id}.`,CW).forEach(l=>{ t(l,M,y+4); y+=4; });
   return doc.output("blob");
@@ -872,6 +878,7 @@ function viewPayments(b){
   </div>
   ${["signed","ready","sent"].includes(b.status) && due ? `<p class="note">Collect before handover: <b>${inr(due)}</b> (rental ${inr(L.c.rental+L.c.delivery)}${L.c.deposit?` + deposit ${inr(L.c.deposit)}`:""})${depType(b)!=="cash"?`, and take the security: ${esc(depShort(b))}`:""}.</p>`:""}
 
+  ${upiCardHTML(b)}
   <section class="pcard"><h3>Record a payment</h3>
     ${quick.length?`<div class="actions" style="margin-bottom:10px"><span class="muted" style="font-size:13px;align-self:center">Quick fill:</span>${quick.join("")}</div>`:""}
     <div class="grid">
@@ -969,6 +976,7 @@ function viewDetail(){
           <button class="btn" data-act="edit" ${["handed","returned"].includes(b.status)?"disabled":""}>Edit details and charges</button>
           ${custOfBooking(b)?`<button class="btn" data-custview="${esc(custOfBooking(b).id)}">Customer profile</button>`:""}
           ${waButton(b.phone, summaryText(b), "WhatsApp booking details")}
+          ${reminderButtonsHTML(b)}
           <button class="btn" data-act="copy-wa">Copy booking summary</button>
           ${b.status!=="cancelled" && !["handed","returned"].includes(b.status) ? `<button class="btn danger" data-act="cancel-booking">Cancel booking</button>`:""}
           <button class="btn danger" data-act="ask-delete">Delete</button>
@@ -1074,6 +1082,7 @@ function carWarnings(c){
   if(ins.missing) w.push("Insurance expiry date not added"); else if(ins.bad || ins.cls==="s-sent") w.push("Insurance: "+ins.label.toLowerCase());
   if(puc.missing) w.push("PUC expiry date not added"); else if(puc.bad || puc.cls==="s-sent") w.push("PUC: "+puc.label.toLowerCase());
   if(!c.idv) w.push("IDV not added (used for total-loss claims)");
+  const sv=serviceStatus(c, S.bookings); if(sv.state==="due"||sv.state==="soon") w.push(serviceLabel(sv));
   return w;
 }
 function carNow(c){
@@ -1100,7 +1109,7 @@ function pickGridHTML(selId, pickup, drop){
       <span class="plate">${esc(c.plate)}</span>
       <b>${esc(c.make_model)}</b>
       <span class="muted num">${inr(c.rate)}/day · ${esc(c.category||"")}</span>
-      ${clash?`<span class="pickflag bad">Booked: ${esc(clash.name)}</span>`: w?`<span class="pickflag warn">${w} paper${w>1?"s":""} to check</span>`:`<span class="pickflag ok">Ready</span>`}
+      ${clash?`<span class="pickflag bad">Booked: ${esc(clash.name)}</span>`: w?`<span class="pickflag warn">${w} thing${w>1?"s":""} to check</span>`:`<span class="pickflag ok">Ready</span>`}
     </button>`;}).join("")}</div>`;
 }
 function carInfoHTML(carId, drop){
@@ -1281,7 +1290,7 @@ function carCard(c){
     <span><b class="car-name">${esc(c.make_model)}</b><span class="meta">${esc([c.category,c.reg_type,c.fuel,c.transmission].filter(Boolean).join(" · "))}</span></span>
     <span class="rate num">${inr(c.rate)} <small>/ day · deposit ${inr(c.deposit)}</small></span>
     <span class="pill ${now.cls}" style="align-self:flex-start">${esc(now.label)}</span>
-    ${w.length?`<span class="warnline">${w.length} paper${w.length>1?"s":""} to check</span>`:`<span class="okline">Papers in order</span>`}
+    ${w.length?`<span class="warnline">${w.length} thing${w.length>1?"s":""} to check</span>`:`<span class="okline">Papers and service in order</span>`}
   </button>`;
 }
 function viewCarProfile(c){
@@ -1326,6 +1335,7 @@ function viewCarProfile(c){
         ${row("Year", esc(c.year||"—"))}
         ${row("Available for booking", c.active===false?"No":"Yes")}
       </dl></div>
+      ${serviceCardHTML(c)}
       <div class="card"><h3>Usage</h3><dl class="kv-grid num">
         ${row("Trips completed or running", String(done.length))}
         ${row("Days rented", String(days))}
@@ -1365,6 +1375,12 @@ function viewCarForm(){
       ${fieldHTML("c_ins_till","Insurance valid till",g("insurance_till"),{type:"date"})}
       ${fieldHTML("c_idv","Insured Declared Value (₹)",g("idv"),{type:"number",attrs:'min="0"'})}
       ${fieldHTML("c_puc","PUC valid till",g("puc_till"),{type:"date"})}
+    </div></fieldset>
+    <fieldset><legend>Service and odometer</legend><div class="grid">
+      ${fieldHTML("c_svc_int","Service every (km)",g("service_interval")||10000,{type:"number",attrs:'min="1000" step="500"'})}
+      ${fieldHTML("c_svc_km","Last service at (km)",g("service_km"),{type:"number",attrs:'min="0"',hint:"Odometer reading at the last service"})}
+      ${fieldHTML("c_svc_date","Last service date",g("service_date"),{type:"date"})}
+      ${fieldHTML("c_odo","Odometer now (km), optional",g("odo_manual"),{type:"number",attrs:'min="0"',hint:"Updates on its own from booking pickup and return readings"})}
     </div></fieldset>
     <fieldset><legend>Pricing</legend><div class="grid">
       ${fieldHTML("c_rate","Daily rate (₹)",g("rate"),{type:"number",req:1,attrs:'min="0" step="50"'})}
@@ -1411,6 +1427,12 @@ function viewSettings(){
       ${s.owner_sign?`<div class="sigprev"><img class="sigimg" src="${s.owner_sign}" alt="Your saved signature"><button type="button" class="linkbtn" data-act="sign-remove">Remove signature</button></div>`:""}
       ${s.owner_sign_mode==="printed"&&!s.owner_sign?`<p class="err" style="margin-top:8px">Upload your signature. Until then, agreements show an empty signature box for DriveKaro.</p>`:""}
     </fieldset>
+    <fieldset><legend>Reminders and daily summary</legend><div class="grid">
+      ${fieldHTML("s_review","Google review link",g("google_review"),{wide:1,attrs:'placeholder="https://g.page/r/…/review" inputmode="url"',hint:"Google Business Profile → Ask for reviews → copy the link. Used in the review request message."})}
+      ${fieldHTML("s_ownwa","Your WhatsApp number",g("owner_whatsapp"),{hint:"For “Summary to my WhatsApp”. Blank = support phone."})}
+      ${fieldHTML("s_sumemail","Daily summary email",g("summary_email"),{type:"email",hint:"Sent every morning around 7 AM."})}
+    </div>
+    <div class="actions" style="margin-top:12px"><button type="button" class="btn sm" data-act="test-summary">Send test email now</button></div></fieldset>
     <fieldset><legend>Default charges for new bookings</legend><div class="grid">${chargeFieldsHTML("sc_", {...DEFAULT_CHARGES, ...(s.charges||{})})}</div></fieldset>
     <fieldset><legend>Agreement terms</legend><div class="grid">
       ${num("s_nonret","Non-return after (hours)","non_return_hours","Recovery steps start after this")}
@@ -1734,6 +1756,159 @@ function depFieldsHTML(g, errs){
 }
 function showDepFields(){ const t=$("#f_deptype")?.value||"cash"; document.querySelectorAll(".depf").forEach(el=>el.hidden = el.dataset.dep!==t); }
 
+/* ---------- UPI payments ---------- */
+function upiFor(b, amount){ const s=S.settings; return s.official_upi ? upiLink({upi:s.official_upi, name:s.legal_name, amount, note:`${s.business_name||"DriveKaro"} ${b.id}`}) : ""; }
+function payLinkFor(b, amount){ return S.settings.official_upi && amount>0 ? payUrl(location.origin, b.id, amount) : ""; }
+function payText(b, amount){
+  const s=S.settings;
+  return [`Hello ${b.name}, please pay ${inr(amount)} for your ${s.business_name} booking ${b.id}:`, payLinkFor(b,amount), ``, `Or pay to our UPI ID: ${s.official_upi}`, `Please share the payment screenshot here. Thank you.`, ``, `${s.legal_name} · ${s.support_phone}`].join("\n");
+}
+function fillQRs(){
+  document.querySelectorAll("img[data-qr]:not([data-done])").forEach(img=>{
+    img.dataset.done="1";
+    QRCode.toDataURL(img.dataset.qr,{margin:1,width:440,errorCorrectionLevel:"M"}).then(u=>{ img.src=u; }).catch(()=>{});
+  });
+}
+function upiCardHTML(b){
+  const s=S.settings;
+  if(!s.official_upi) return `<section class="pcard"><h3>Collect by UPI</h3><p class="note" style="margin:0 0 10px">Add your official UPI ID in Settings to show a payment QR here, on invoices and in WhatsApp messages.</p><button class="btn sm" data-act="goto-settings">Open Settings</button></section>`;
+  const due=dueNow(b,s); const amt=S.upiAmt?.[b.id] ?? due;
+  return `<section class="pcard"><h3>Collect by UPI</h3>
+    <div class="upibox">
+      <img class="upiqr" id="upiqr" data-qr="${esc(upiFor(b,amt))}" alt="UPI QR code for ${esc(inr(amt))}" width="176" height="176">
+      <div class="upiside">
+        ${fieldHTML("u_amt","Amount (₹)",amt||"",{type:"number",attrs:'min="1" inputmode="numeric"',hint:due>0?`Due now: ${inr(due)}${["draft","ready","sent","signed"].includes(b.status)&&depCash(b)?" (incl. deposit)":""}`:"Nothing due right now"})}
+        <div class="muted" style="font-size:13px;margin:8px 0 10px">Customer scans this QR at the counter, or you send the link. Pays to <b>${esc(s.official_upi)}</b> with note “${esc(`${s.business_name||"DriveKaro"} ${b.id}`)}”.</div>
+        <div class="actions">${waHref(b.phone,"x")?`<a class="btn sm primary wa" id="u_wa" href="${esc(waHref(b.phone,payText(b,amt)))}" target="_blank" rel="noopener">Send pay link on WhatsApp</a>`:""}<button class="btn sm" data-act="copy-paylink">Copy link</button></div>
+      </div>
+    </div>
+    <p class="note" style="margin:12px 0 0">After the money arrives, record it above in “Record a payment”.</p>
+  </section>`;
+}
+function onUpiAmount(){
+  const b=S.bookings.find(x=>x.id===S.selected); if(!b) return;
+  const amt=Math.round(Number($("#u_amt").value)||0); S.upiAmt={...(S.upiAmt||{}), [b.id]:amt};
+  const img=$("#upiqr"); if(img && amt>0){ img.dataset.qr=upiFor(b,amt); delete img.dataset.done; fillQRs(); }
+  const a=$("#u_wa"); if(a && amt>0) a.href=waHref(b.phone,payText(b,amt));
+}
+async function qrDataUrl(text){ try{ return await QRCode.toDataURL(text,{margin:1,width:400,errorCorrectionLevel:"M"}); }catch(e){ return null; } }
+
+/* ---------- reminders and review requests ---------- */
+function remindText(kind, b){
+  const s=S.settings, car=carOf(b)||{}, where=b.location||s.designated_location;
+  const due=dueNow(b,s), link=payLinkFor(b,due);
+  if(kind==="pickup") return [`Hello ${b.name}, a reminder from ${s.business_name}.`, `Your ${car.make_model||"car"} is booked for pickup on *${fmtDT(b.pickup)}* at ${where}.`, ``, `Please bring your *original driving licence*.`,
+    b.status==="signed"?`Your rental agreement is signed. ✓`:`Please sign the rental agreement with Aadhaar OTP before pickup (link sent earlier).`,
+    due>0?`Amount due before handover: ${inr(due)}${link?`\nPay here: ${link}`:""}`:"", ``, `See you soon! ${s.support_phone}`].filter((l,i,a)=>l!==""||a[i-1]!=="").join("\n");
+  if(kind==="return") return [`Hello ${b.name}, a reminder from ${s.business_name}.`, `Please return the ${car.make_model||"car"} (${car.plate||""}) by *${fmtDT(b.drop)}* at ${where}.`,
+    b.fuel?`Please return it with the same fuel level as pickup (${b.fuel}).`:"", `Need more time? Reply here before ${fmtDT(b.drop)} and we'll extend it if the car is free. Late return is charged as per your agreement.`, ``, `Drive safe! ${s.support_phone}`].filter(Boolean).join("\n");
+  if(kind==="review") return [`Hello ${b.name}, thank you for driving with ${s.business_name}! 🙏`, `If you enjoyed the trip, a quick Google review would help us a lot:`, s.google_review||"", ``, `We'd love to have you again. ${s.support_phone}`].join("\n");
+  return "";
+}
+function remindBtn(kind, b, label, cls="btn sm"){
+  if(kind==="review" && !S.settings.google_review) return `<button class="${cls}" data-act="goto-settings" title="Add your Google review link in Settings">${label}</button>`;
+  const h=waHref(b.phone, remindText(kind,b)); if(!h) return "";
+  const done=(b.reminders||{})[kind];
+  return `<a class="${cls} wa" href="${esc(h)}" target="_blank" rel="noopener" data-remind="${kind}" data-id="${esc(b.id)}" title="${done&&done!=="skipped"?`Sent ${esc(fmtDT(done))}`:"Opens WhatsApp with the message ready"}">${label}${done&&done!=="skipped"?" ✓":""}</a>`;
+}
+function reminderButtonsHTML(b){
+  const out=[];
+  if(["ready","sent","signed"].includes(b.status)) out.push(remindBtn("pickup",b,"Pickup reminder","btn"));
+  if(b.status==="handed") out.push(remindBtn("return",b,"Return reminder","btn"));
+  if(b.status==="returned") out.push(remindBtn("review",b,"Ask for Google review","btn"));
+  return out.join("");
+}
+
+/* ---------- Today panel (same data as the morning email) ---------- */
+function ownerWa(){ return S.settings.owner_whatsapp || S.settings.support_phone; }
+function todayHTML(){
+  if(S.dbState==="loading") return "";
+  const T=daySummary({bookings:S.bookings, fleet:S.fleet, settings:S.settings});
+  const car=b=>{ const c=carOf(b)||{}; return `${c.make_model||""}${c.plate?` · ${c.plate}`:""}`; };
+  const open=b=>`<button class="btn sm" data-open="${esc(b.id)}">Open</button>`;
+  const rows=[];
+  T.overdue.forEach(b=>rows.push({tone:"bad", title:`Overdue · ${b.name}`, sub:`${car(b)} · was due ${fmtDT(b.drop)}`, act:remindBtn("return",b,"Remind")+open(b)}));
+  T.missedPickups.forEach(b=>rows.push({tone:"warn", title:`Pickup time passed · ${b.name}`, sub:`${car(b)} · ${fmtDT(b.pickup)} · mark handed over or cancel`, act:open(b)}));
+  T.pickupsToday.forEach(b=>rows.push({tone:"", title:`${fmtTime(b.pickup)} pickup · ${b.name}`, sub:`${car(b)}${b.status!=="signed"?" · agreement not signed yet":""}`, act:remindBtn("pickup",b,"Remind")+open(b)}));
+  T.returnsToday.forEach(b=>rows.push({tone:"", title:`${fmtTime(b.drop)} return · ${b.name}`, sub:car(b), act:remindBtn("return",b,"Remind")+open(b)}));
+  T.pickupsTomorrow.forEach(b=>rows.push({tone:"", title:`Tomorrow ${fmtTime(b.pickup)} · ${b.name}`, sub:`${car(b)}${b.status!=="signed"?" · agreement not signed yet":""}`, act:remindBtn("pickup",b,"Remind")+open(b)}));
+  T.returnsTomorrow.forEach(b=>rows.push({tone:"", title:`Tomorrow ${fmtTime(b.drop)} return · ${b.name}`, sub:car(b), act:remindBtn("return",b,"Remind")+open(b)}));
+  T.toCollect.forEach(x=>rows.push({tone:x.amount<0?"":"warn", title:x.amount<0?`Settle deposit ${inr(-x.amount)} · ${x.b.name}`:`${inr(x.amount)} to collect · ${x.b.name}`, sub:`${car(x.b)} · ${x.why}`, act:`<button class="btn sm" data-open="${esc(x.b.id)}" data-tab="payments">Payments</button>`}));
+  T.papers.forEach(p=>rows.push({tone:p.bad?"bad":"warn", title:`${p.car.plate} · ${p.label}`, sub:p.car.make_model||"", act:`<button class="btn sm" data-carview="${esc(p.car.id)}">Car</button>`}));
+  T.service.forEach(x=>rows.push({tone:x.st.state==="due"?"bad":"warn", title:`${x.car.plate} · ${x.label}`, sub:`${x.car.make_model||""} · odometer ${x.st.current.toLocaleString("en-IN")} km`, act:`<button class="btn sm" data-carview="${esc(x.car.id)}">Car</button>`}));
+  T.reviews.forEach(b=>rows.push({tone:"", title:`Ask ${b.name} for a Google review`, sub:`${car(b)} · returned`, act:remindBtn("review",b,"Ask")+`<button class="btn sm" data-act="review-skip" data-id="${esc(b.id)}">Skip</button>`}));
+  const wa=waHref(ownerWa(), daySummaryText(T,{fleet:S.fleet, settings:S.settings}));
+  const row=r=>`<div class="trow ${r.tone}"><span class="tdot"></span><span class="tmain"><b>${esc(r.title)}</b><small>${esc(r.sub)}</small></span><span class="tact">${r.act}</span></div>`;
+  const first=rows.slice(0,6), more=rows.slice(6);
+  return `<section class="today">
+    <div class="today-h"><div><span class="label">Today</span><h3>${esc(new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long"}))}</h3></div>
+      ${wa?`<a class="btn sm wa" href="${esc(wa)}" target="_blank" rel="noopener" title="Opens WhatsApp with today's summary, to send to yourself">Summary to my WhatsApp</a>`:""}</div>
+    <div class="stats num"><span><b>${T.pickupsToday.length}</b>pickups</span><span><b>${T.returnsToday.length+T.overdue.length}</b>returns${T.overdue.length?` <em class="bad">(${T.overdue.length} overdue)</em>`:""}</span><span><b>${T.out.length}</b>cars out</span><span><b>${inr(T.collectTotal)}</b>to collect</span></div>
+    ${rows.length?`<div class="tlist">${first.map(row).join("")}${more.length?`<details class="tmore"><summary>Show ${more.length} more</summary>${more.map(row).join("")}</details>`:""}</div>`:`<p class="muted" style="margin:10px 0 0;font-size:14px">Nothing due today. All clear.</p>`}
+  </section>`;
+}
+
+/* ---------- service by km ---------- */
+function serviceCardHTML(c){
+  const st=serviceStatus(c, S.bookings), cur=carOdometer(c, S.bookings);
+  const src={return:"return reading", pickup:"pickup reading", manual:"entered by you", service:"last service"};
+  const pill = st.state==="due"?`<span class="pill s-cancelled">Service overdue</span>`:st.state==="soon"?`<span class="pill s-sent">Service due soon</span>`:st.state==="ok"?`<span class="pill s-signed">OK</span>`:`<span class="pill s-draft">Not set up</span>`;
+  return `<div class="card"><h3>Service ${pill}</h3><dl class="kv-grid num">
+    <div><dt>Odometer now</dt><dd>${cur?`${cur.km.toLocaleString("en-IN")} km <small class="muted">${esc(src[cur.src]||"")}, ${esc(fmtD(ymd(cur.at)))}</small>`:"—"}</dd></div>
+    <div><dt>Service every</dt><dd>${(Number(c.service_interval)||10000).toLocaleString("en-IN")} km</dd></div>
+    <div><dt>Last service</dt><dd>${c.service_km?`${Number(c.service_km).toLocaleString("en-IN")} km${c.service_date?` · ${esc(fmtD(c.service_date))}`:""}`:"Not added"}</dd></div>
+    <div><dt>Next service</dt><dd>${esc(serviceLabel(st))}</dd></div>
+  </dl>
+  <div class="actions" style="margin-top:12px">${cur?`<button class="btn sm${st.state==="due"||st.state==="soon"?" primary":""}" data-act="svc-done" data-car="${esc(c.id)}" data-km="${cur.km}">Serviced now at ${cur.km.toLocaleString("en-IN")} km</button>`:""}<button class="btn sm" data-editcar="${esc(c.id)}">Edit service details</button></div>
+  <p class="muted" style="margin:10px 0 0;font-size:12.5px">The odometer updates from pickup and return readings on bookings.</p></div>`;
+}
+
+/* ---------- utilisation ---------- */
+function utilWindow(R){
+  const now=new Date();
+  if(R.range==="month"){ const [y,m]=R.month.split("-").map(Number); return {start:new Date(y,m-1,1), end:new Date(Math.min(new Date(y,m,1), now))}; }
+  if(R.range==="fy") return {start:new Date(R.fyY,3,1), end:new Date(Math.min(new Date(R.fyY+1,3,1), now))};
+  const first=S.bookings.filter(b=>EARNED.includes(b.status)).map(b=>new Date(b.pickup)).filter(d=>!isNaN(d)).sort((a,b)=>a-b)[0];
+  return {start:first||now, end:now};
+}
+function utilRows(R){
+  const {start,end}=utilWindow(R); const now=new Date();
+  const cars=S.fleet.filter(c=>!S.repCar||S.repCar==="all"||c.id===S.repCar);
+  return cars.map(c=>{
+    const firstTrip=S.bookings.filter(b=>b.car_id===c.id && EARNED.includes(b.status)).map(b=>new Date(b.pickup)).filter(d=>!isNaN(d)).sort((a,b)=>a-b)[0];
+    const added=c.created_at ? new Date(Math.min(new Date(c.created_at), firstTrip||Infinity)) : start;
+    const from=new Date(Math.max(start, added));
+    const avail=Math.max(0,(end-from)/864e5);
+    let rented=0, rev=0;
+    for(const b of S.bookings){
+      if(b.car_id!==c.id || !EARNED.includes(b.status)) continue;
+      const p=new Date(b.pickup), e=new Date(b.status==="returned"&&b.return_at?b.return_at:(b.status==="handed"?Math.min(new Date(b.drop),now):b.drop));
+      const ov=Math.max(0,(Math.min(e,end)-Math.max(p,from))/864e5); rented+=ov;
+      if(ov>0 || (p>=start && p<end)){ const L=ledger(b); const tot=(e-p)/864e5; rev+= tot>0 ? L.total*Math.min(1,ov/tot) : 0; }
+    }
+    const x=expTotal(expFor(c.id), k=>{ const d=new Date(k+"-15T12:00"); return d>=new Date(start.getFullYear(),start.getMonth(),1) && d<end; });
+    return {c, avail, rented:Math.min(rented,avail||rented), rev, exp:x, profit:rev-x};
+  }).sort((a,b)=>(b.rented/(b.avail||1))-(a.rented/(a.avail||1)));
+}
+function utilHTML(R){
+  const rows=utilRows(R); if(!rows.length) return "";
+  const d1=v=>v>=10?Math.round(v):Math.round(v*10)/10;
+  const tot=rows.reduce((t,r)=>({avail:t.avail+r.avail, rented:t.rented+r.rented, rev:t.rev+r.rev, profit:t.profit+r.profit}),{avail:0,rented:0,rev:0,profit:0});
+  const pct=r=>r.avail?Math.round(r.rented/r.avail*100):0;
+  return `<section class="pcard" style="margin-top:14px"><h3>Car utilisation · ${esc(R.rangeLabel)}</h3>
+    <p class="muted" style="margin:-4px 0 10px;font-size:13px">Days on rent out of days the car was available (up to today). Revenue is split by the days of each trip inside this period.</p>
+    <div class="mtable m4 util">
+      <div class="mrow mhead"><span>Car</span><span class="r">Used</span><span class="r">₹ / rented day</span><span class="r">Profit / day</span></div>
+      ${rows.map(r=>`<button class="mrow" data-carview="${esc(r.c.id)}"><span><span class="plate">${esc(r.c.plate)}</span><small class="muted">${d1(r.rented)} of ${d1(r.avail)} days · ${d1(Math.max(0,r.avail-r.rented))} idle</small></span>
+        <span class="r num b">${r.avail>=1?`${pct(r)}%<i class="bar ${pct(r)<40?"lo":""}" style="width:${pct(r)}%"></i>`:`<small class="muted" style="font-weight:400">new car</small>`}</span>
+        <span class="r num">${r.rented>=0.5?inr(r.rev/r.rented):"–"}</span>
+        <span class="r num">${r.avail>=1?`<span class="${r.profit<0?"neg":""}">${r.profit<0?"− ":""}${inr(Math.abs(r.profit/r.avail))}</span>`:"–"}</span></button>`).join("")}
+      ${rows.length>1?`<div class="mrow mfoot"><span>All cars</span><span class="r num">${tot.avail?Math.round(tot.rented/tot.avail*100):0}%</span><span class="r num">${tot.rented>=0.5?inr(tot.rev/tot.rented):"–"}</span><span class="r num">${tot.avail>=1?`${tot.profit<0?"− ":""}${inr(Math.abs(tot.profit/tot.avail))}`:"–"}</span></div>`:""}
+    </div>
+    <p class="muted" style="margin:10px 0 0;font-size:12.5px">Below 40% used for a few months: try a lower rate or weekend offers. Above 80%: the car can take a higher rate, or you may need another car like it.</p>
+  </section>`;
+}
+
 /* ---------- extensions ---------- */
 // The signed agreement always shows the original booking; extensions are recorded as addenda.
 function agreedBooking(b){ const x=b.extensions||[]; return x.length ? {...b, drop:x[0].from, extensions:[]} : b; }
@@ -1917,7 +2092,7 @@ function expFormHTML(){
   const car = S.expForm?.car ?? (S.repCar && S.repCar!=="all" ? S.repCar : "");
   return `<section class="pcard" id="expform"><h3>Add expense</h3><div class="grid">
     ${selectHTML("ex_car","Car",car,[["","Business (not one car)"],...S.fleet.map(c=>[c.id,`${c.plate} · ${c.make_model}`])])}
-    ${selectHTML("ex_cat","Type","Service",EXP_CATS.map(c=>[c,c]))}
+    ${selectHTML("ex_cat","Type",S.expForm?.cat||"Service",EXP_CATS.map(c=>[c,c]))}
     ${fieldHTML("ex_amt","Amount (₹)","",{type:"number",attrs:'min="1" inputmode="numeric"'})}
     ${fieldHTML("ex_date","Date",ymd(new Date()),{type:"date"})}
     ${selectHTML("ex_rep","Repeats","",[["","One time"],["monthly","Every month"]],{hint:"Use Every month for EMI, parking rent, tracker fees."})}
@@ -2018,6 +2193,7 @@ function viewRevenue(){
         ${genExp?`<div class="mrow"><span>Business<small class="muted">not one car</small></span><span class="r num">–</span><span class="r num">${inr(genExp)}</span><span class="r num b">${pf(-genExp)}</span></div>`:""}
       </div></section>`:""}
   </div>
+  ${utilHTML(R)}
   <div class="head-row" style="margin-top:18px;align-items:center">
     <h3 style="font-size:17px;margin:0">Bookings${car?` · ${esc(car.plate||"")} ${esc(car.make_model||"")}`:""}</h3>
     <div class="actions">${S.downloads?`<button class="btn sm primary" data-act="rep-export">Export sheet (CSV)</button>`:""}</div>
@@ -2100,7 +2276,7 @@ async function nextInvoiceNo(){
 }
 function summaryText(b){
   const car=carOf(b)||{}; const c=calc(b); const s=S.settings;
-  return [`*${s.business_name} booking ${b.id}*`,`Name: ${b.name}`,`Car: ${car.make_model||""} (${car.plate||""})`,`Pickup: ${fmtDT(b.pickup)}`,`Drop-off: ${fmtDT(b.drop)}`,`Pickup point: ${b.location||s.designated_location}`,`Duration: ${durText(c)}`,`Rental: ${inr(c.rental)}`,...(c.delivery?[`Delivery: ${inr(c.delivery)}`]:[]),depType(b)==="cash"?`Refundable deposit: ${inr(c.deposit)}`:`Security deposit: ${depShort(b)} (returned after the trip)`,`Total before handover: ${inr(c.collected)}`,`Includes ${c.km} km. Extra ${money(b,"extra_km")}/km.`,`Please carry your original driving licence. Your rental agreement will come for Aadhaar eSign before pickup.`,`Questions: ${s.support_phone}`].join("\n");
+  return [`*${s.business_name} booking ${b.id}*`,`Name: ${b.name}`,`Car: ${car.make_model||""} (${car.plate||""})`,`Pickup: ${fmtDT(b.pickup)}`,`Drop-off: ${fmtDT(b.drop)}`,`Pickup point: ${b.location||s.designated_location}`,`Duration: ${durText(c)}`,`Rental: ${inr(c.rental)}`,...(c.delivery?[`Delivery: ${inr(c.delivery)}`]:[]),depType(b)==="cash"?`Refundable deposit: ${inr(c.deposit)}`:`Security deposit: ${depShort(b)} (returned after the trip)`,`Total before handover: ${inr(c.collected)}`,`Includes ${c.km} km. Extra ${money(b,"extra_km")}/km.`,`Please carry your original driving licence. Your rental agreement will come for Aadhaar eSign before pickup.`,...(dueNow(b,s)>0&&s.official_upi?[`Pay ${inr(dueNow(b,s))} online: ${payLinkFor(b,dueNow(b,s))}`]:[]),`Questions: ${s.support_phone}`].join("\n");
 }
 function agreementText(b){
   const A=buildAgreement(b); const out=[`SELF-DRIVE VEHICLE RENTAL AGREEMENT`,`${S.settings.legal_name} | Agreement No. ${b.id} | Template v2.0`,""];
@@ -2113,6 +2289,8 @@ async function copy(text, done){
 }
 
 document.addEventListener("click", async e=>{
+  const ra=e.target.closest("a[data-remind]");
+  if(ra){ const b=S.bookings.find(x=>x.id===ra.dataset.id); if(b) setTimeout(()=>patchBooking(b,{reminders:{...(b.reminders||{}), [ra.dataset.remind]:new Date().toISOString()}}),300); return; }
   if(e.target.closest('[data-act="sign-remove"]')){ if(confirm("Remove your saved signature?")) saveSignSettings({owner_sign:""},"Signature removed."); return; }
   const t=e.target.closest("button"); if(!t) return;
   if(t.classList.contains("tab")){ const keepDraft = t.dataset.view==="new" && !S.editId; S.view=t.dataset.view; S.selected=null; S.carEdit=null; S.carView=null; S.custView=null; S.custEdit=null; S.confirmDelete=null; S.extForm=null; S.expForm=null; if(!keepDraft){ S.editId=null; S.draft=null; } render(); window.scrollTo(0,0); return; }
@@ -2130,12 +2308,24 @@ document.addEventListener("click", async e=>{
   if(t.dataset.carview){ if(t.dataset.keepdraft && !S.editId) S.draft=readForm(); S.view="fleet"; S.carView=t.dataset.carview; S.carEdit=null; render(); window.scrollTo(0,0); return; }
   if(t.dataset.filter){ S.filter=t.dataset.filter; render(); return; }
   if(t.dataset.dtab){ S.detailTab=t.dataset.dtab; render(); return; }
-  if(t.dataset.open){ S.extForm=null; S.view="bookings"; S.detailTab=isMobile()?"overview":"agreement"; S.confirmPay=null; S.confirmSettle=false; S.selected=t.dataset.open; S.confirmDelete=null; render(); window.scrollTo(0,0); return; }
+  if(t.dataset.open){ S.extForm=null; S.view="bookings"; S.detailTab=t.dataset.tab||(isMobile()?"overview":"agreement"); S.confirmPay=null; S.confirmSettle=false; S.selected=t.dataset.open; S.confirmDelete=null; render(); window.scrollTo(0,0); return; }
   if(t.dataset.editcar){ S.carEdit=t.dataset.editcar; S.confirmCar=false; render(); return; }
   const act=t.dataset.act; if(!act) return;
   const b = S.selected ? S.bookings.find(x=>x.id===S.selected) : null;
   switch(act){
     case "new": S.editId=null; S.draft=null; S.view="new"; render(); break;
+    case "goto-settings": S.view="settings"; S.selected=null; render(); window.scrollTo(0,0); break;
+    case "copy-paylink": { const amt=Math.round(Number($("#u_amt")?.value)||0); if(amt>0) copy(payLinkFor(b,amt),"Payment link copied."); else toast("Enter an amount first."); break; }
+    case "review-skip": { const x=S.bookings.find(y=>y.id===t.dataset.id); if(x && await patchBooking(x,{reminders:{...(x.reminders||{}), review:"skipped"}})) toast("Removed from the list."); break; }
+    case "svc-done": { const c=S.fleet.find(x=>x.id===t.dataset.car); if(!c) break; const doc={...c, service_km:Number(t.dataset.km), service_date:ymd(new Date())}; if(await write("fleet/"+c.id,doc)){ localUpsert(S.fleet,doc); render(); toast("Service recorded. Add the bill in Revenue → + Add expense."); } break; }
+    case "test-summary": {
+      t.disabled=true; const old=t.textContent; t.textContent="Sending…";
+      try{
+        const em=($("#s_sumemail")?.value||"").trim();
+        if(em && em!==S.settings.summary_email){ const doc={...S.settings, summary_email:em}; if(await write("settings/business",doc)) S.settings=doc; }
+        const r=await api("/api/cron/daily",{}); toast(`Summary sent to ${r.to}.`);
+      }catch(err){ toast(err.message); }
+      t.disabled=false; t.textContent=old; break; }
     case "cal-book": startBookingFor(t.dataset.car, S.calFrom, S.calTo); break;
     case "ext-open": S.extForm=b.id; render(); updateExtInfo(); $("#e_drop")?.focus(); break;
     case "ext-cancel": S.extForm=null; render(); break;
@@ -2258,7 +2448,7 @@ document.addEventListener("click", async e=>{
       break; }
     case "inv-pdf": {
       if(!b||!S.downloads) break;
-      try{ const blob=invoicePdf(b); const safe=(b.invoice?.no||b.id).replace(/[^a-z0-9]+/gi,"-"); await S.downloads.save({filename:`DriveKaro-Invoice-${safe}.pdf`, data:blob}); }
+      try{ const L0=ledger(b); const qr=L0.balance>0&&S.settings.official_upi?await qrDataUrl(upiFor(b,L0.balance)):null; const blob=invoicePdf(b, qr); const safe=(b.invoice?.no||b.id).replace(/[^a-z0-9]+/gi,"-"); await S.downloads.save({filename:`DriveKaro-Invoice-${safe}.pdf`, data:blob}); }
       catch(err){ if(err && err.code==="declined") return; toast("Couldn't save the PDF here. Use Copy text instead."); }
       break; }
     case "copy-invoice": if(b) copy(invoiceText(b),"Invoice text copied."); break;
@@ -2300,6 +2490,7 @@ document.addEventListener("input", e=>{
   if(e.target.id==="doc_type") S.docType=e.target.value;
   if(e.target.id==="e_drop") updateExtInfo();
   if(e.target.id==="e_amount") delete e.target.dataset.auto;
+  if(e.target.id==="u_amt") onUpiAmount();
   if(e.target.closest("#bform")) updateSummary();
 });
 document.addEventListener("focusin", e=>{ if(e.target.id==="f_phone") renderCustDropdown(); });
@@ -2336,7 +2527,10 @@ document.addEventListener("submit", async e=>{
     const id=prev?.id || plate.replace(/[^A-Z0-9]/g,"");
     const doc={...(prev||{}), id, make_model:make, plate, chassis_last5:v("c_chassis").toUpperCase(), category:v("c_cat"), colour:v("c_colour"), year:v("c_year"), fuel:v("c_fuel"), transmission:v("c_trans"), seats:v("c_seats"), fastag:v("c_fastag"),
       reg_type:v("c_regtype"), permit_no:v("c_permit"), insurance_no:v("c_ins"), insurer:v("c_insurer"), insurance_till:v("c_ins_till"), idv:v("c_idv")?Number(v("c_idv")):"", puc_till:v("c_puc"),
-      rate:Number(rate), deposit:Number(v("c_dep")||0), active:v("c_active")!=="no"};
+      rate:Number(rate), deposit:Number(v("c_dep")||0), active:v("c_active")!=="no",
+      service_interval:Number(v("c_svc_int"))||10000, service_km:v("c_svc_km")?Number(v("c_svc_km")):"", service_date:v("c_svc_date"),
+      odo_manual:v("c_odo")?Number(v("c_odo")):"", odo_manual_at:(v("c_odo") && String(prev?.odo_manual??"")!==v("c_odo")) ? new Date().toISOString() : (prev?.odo_manual_at||""),
+      created_at:prev ? (prev.created_at||"") : new Date().toISOString()};
     delete doc.example;
     if(!(await write("fleet/"+id,doc))) return;
     localUpsert(S.fleet,doc); S.carEdit=null; S.carView=id; render(); toast("Car saved.");
@@ -2346,7 +2540,8 @@ document.addEventListener("submit", async e=>{
     const doc={...S.settings, legal_name:v("s_legal")||DEFAULT_SETTINGS.legal_name, signatory:v("s_sign"), shop_act:v("s_shop"), udyam:v("s_udyam"),
       support_phone:v("s_phone"), support_email:v("s_email"), grievance_email:v("s_griev"), official_upi:v("s_upi"), official_bank:v("s_bank"), address:v("s_address"), designated_location:v("s_loc"),
       non_return_hours:n("s_nonret"), unreachable_hours:n("s_unreach"), return_inspection_hours:n("s_retinsp"), emergency_repair_limit:n("s_repair"), late_interest:n("s_interest"), tracking_retention_days:n("s_track"), fast_track_limit:n("s_fast"),
-      min_age:n("s_age"), min_age_premium:n("s_age2"), dl_min_months:n("s_dlm"), charges:readCharges("sc_")};
+      min_age:n("s_age"), min_age_premium:n("s_age2"), dl_min_months:n("s_dlm"), charges:readCharges("sc_"),
+      google_review:v("s_review"), owner_whatsapp:v("s_ownwa"), summary_email:v("s_sumemail")};
     if(!(await write("settings/business",doc))) return;
     S.settings=doc; toast("Settings saved.");
   }

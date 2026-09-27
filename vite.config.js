@@ -11,6 +11,8 @@ export default defineConfig({
         main: resolve(import.meta.dirname, 'index.html'),
         // Booking desk for the owner, served at /desk (see vercel.json)
         desk: resolve(import.meta.dirname, 'desk.html'),
+        // Public UPI payment page, served at /pay
+        pay: resolve(import.meta.dirname, 'pay.html'),
       },
     },
   },

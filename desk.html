@@ -435,6 +435,31 @@ button.mrow:hover{background:var(--surface-2)}
   .row.exprow .who{grid-area:who}.row.exprow .amt{grid-area:amt}.row.exprow .rowact{grid-area:act;justify-content:flex-start}
   .mtable.m4 .mrow{font-size:13px;gap:6px}
 }
+
+/* today */
+.today{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin:0 0 14px}
+.today-h{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.today-h h3{font-size:18px;margin:2px 0 0}
+.today .stats em{font-style:normal;font-size:13px}
+.today .stats .bad{color:var(--bad)}
+.tlist{margin-top:10px;border-top:1px solid var(--line)}
+.trow{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.tdot{width:8px;height:8px;border-radius:50%;background:var(--info)}
+.trow.warn .tdot{background:var(--warn)}.trow.bad .tdot{background:var(--bad)}
+.trow.bad b{color:var(--bad)}
+.tmain{display:flex;flex-direction:column;min-width:0}
+.tmain b{font-weight:600;font-size:14px}
+.tmain small{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.tact{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.tmore summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--accent);padding:9px 0}
+@media (max-width:520px){ .trow{grid-template-columns:10px minmax(0,1fr)} .tact{grid-column:2;justify-content:flex-start} }
+/* upi */
+.upibox{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.upiqr{background:#fff;border:1px solid var(--line);border-radius:10px;padding:6px;width:176px;height:176px}
+.upiside{flex:1 1 200px;min-width:0}
+.inv-qr{display:flex;gap:14px;align-items:center;margin:12px 0;font-size:13px}
+.inv-qr img{width:110px;height:110px;border:1px solid var(--paper-line);border-radius:6px}
+.mrow .bar.lo{background:var(--warn)}
   .sigimg{display:block;max-height:48px;max-width:180px;margin:6px 0}
   .sigprev{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;padding:10px;border:1px dashed #d8c9a8;border-radius:10px;background:#fff}
   .sigprev .sigimg{max-height:70px;max-width:240px}

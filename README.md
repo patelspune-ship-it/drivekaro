@@ -49,3 +49,24 @@ Vercel env (Secret, not `VITE_`): `LEEGALITY_AUTH_TOKEN`, `LEEGALITY_PRIVATE_SAL
 (`https://app1.leegality.com/api` or `https://sandbox.leegality.com/api`),
 `SUPABASE_SERVICE_ROLE_KEY`. Optional: `LEEGALITY_OWNER_SIGNS=no` if the workflow has only the
 customer as signer. Webhook URL for the workflow: `https://www.drivekaro.in/api/esign/webhook`.
+
+### UPI payments (`/pay`)
+
+- Set **Official UPI ID** in Desk → Settings. The desk then shows a UPI QR on each booking's Payments tab and on invoices, and adds a pay link to WhatsApp messages.
+- `drivekaro.in/pay?b=<booking id>&a=<amount>` is a public page with the QR and a "Pay with a UPI app" button. The UPI ID always comes from Settings via `/api/pay-info`, never from the link.
+
+### Daily summary email (Vercel Cron + Resend)
+
+- `vercel.json` runs `/api/cron/daily` at 01:30 UTC (about 7 AM IST; Hobby plans may run it any time within that hour).
+- Vercel env vars (mark as **Secret**, no `VITE_` prefix):
+  - `CRON_SECRET`: any long random string. Vercel sends it to the cron route automatically.
+  - `RESEND_API_KEY`: from resend.com (free tier).
+  - Optional `RESEND_FROM` (e.g. `DriveKaro Desk <desk@drivekaro.in>`) once the domain is verified in Resend. Without it, mail is sent from `onboarding@resend.dev`, which Resend only delivers to the email you signed up with.
+- Recipient: Desk → Settings → "Daily summary email" (or env `SUMMARY_EMAIL`). "Send test email now" in Settings sends one immediately.
+- The same summary shows at the top of Bookings ("Today"), with "Summary to my WhatsApp".
+
+### Reminders, service, utilisation
+
+- Pickup / return reminders and Google review requests open WhatsApp with the message ready (free, one tap). Set the Google review link in Settings.
+- Service by km: each car has "Service every (km)" (default 10,000) and "Last service at (km)"; the odometer updates from booking pickup and return readings.
+- Revenue → "Car utilisation": days on rent vs available, revenue per rented day and profit per day.

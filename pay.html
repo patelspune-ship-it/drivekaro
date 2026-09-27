@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#f4e8d0">
+<link rel="icon" type="image/png" href="/favicon.png">
+<title>Pay DriveKaro</title>
+<style>
+:root{--bg:#F4E8D0;--surface:#FFFAF4;--ink:#1A120C;--muted:#6E5C4C;--line:#D6C8B2;--accent:#B5382A;--bad:#B0281F;--ok:#2A7A4B}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0E1719;--surface:#152124;--ink:#E3ECEA;--muted:#94A6A3;--line:#2A3B3F;--accent:#E0604F;--bad:#F08A7E;--ok:#6CC495}}
+:root[data-theme="dark"]{--bg:#0E1719;--surface:#152124;--ink:#E3ECEA;--muted:#94A6A3;--line:#2A3B3F;--accent:#E0604F;--bad:#F08A7E;--ok:#6CC495}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:24px 16px 40px;display:flex;justify-content:center}
+.card{width:100%;max-width:400px;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px 20px;text-align:center}
+h1{font:800 22px/1.2 Arial,sans-serif;margin:0 0 4px}
+h1 b{color:var(--accent)}
+.muted{color:var(--muted);font-size:14px}
+.amt{font:800 38px/1.1 Arial,sans-serif;margin:18px 0 2px}
+.qr{background:#fff;border-radius:12px;padding:12px;display:inline-block;margin:16px 0 6px;border:1px solid var(--line)}
+.qr img{display:block;width:220px;height:220px}
+.btn{display:block;width:100%;background:var(--accent);color:#fff;text-decoration:none;font-weight:700;padding:14px;border-radius:10px;margin-top:14px;border:0;font-size:16px}
+.btn.sec{background:none;color:var(--ink);border:1px solid var(--line)}
+.upi{font:600 15px ui-monospace,Menlo,monospace;margin-top:8px;word-break:break-all}
+.warn{font-size:13px;color:var(--muted);margin-top:16px;border-top:1px dashed var(--line);padding-top:12px;text-align:left}
+.err{color:var(--bad)}
+</style>
+</head>
+<body>
+<main class="card" id="card" aria-live="polite">
+  <h1>Drive<b>Karo</b></h1>
+  <div class="muted">Loading payment details…</div>
+</main>
+<script type="module" src="/src/pay.js"></script>
+</body>
+</html>
