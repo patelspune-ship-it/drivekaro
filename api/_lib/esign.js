@@ -103,7 +103,8 @@ export function buildInvitees(b, settings, c) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(String(b.dob || ''))) ac.verifyYob = String(b.dob).slice(0, 4);
   if (Object.keys(ac).length) cust.aadhaarConfig = { verifySmartName: true, ...ac };
   const list = [cust];
-  if (c.ownerSigns) {
+  // In "printed" mode DriveKaro's signature image is already on the PDF, so only the customer is invited.
+  if (c.ownerSigns && settings?.owner_sign_mode !== 'printed') {
     const owner = { name: String(settings.signatory || 'DriveKaro').trim() };
     const ph = norm10(process.env.LEEGALITY_OWNER_PHONE || settings.support_phone);
     const em = process.env.LEEGALITY_OWNER_EMAIL || settings.support_email;

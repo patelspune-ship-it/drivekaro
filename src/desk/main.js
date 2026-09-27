@@ -416,7 +416,7 @@ function buildAgreement(b){
     {t:"p", text:"16.6 Each Party shall keep confidential any personal or business information of the other received under this Agreement and use it only for this Agreement, except as permitted by this clause 16 or required by law."}
   ]});
   T.push({h:"17. Electronic Execution and Records", body:[
-    {t:"p", text:"17.1 The Parties may sign this Agreement by Aadhaar-based electronic signature or any other electronic signature recognised under section 3A and the Second Schedule of the Information Technology Act, 2000. An electronically signed Agreement is as valid and binding as one signed in ink, and a contract formed electronically is valid under section 10A of that Act."},
+    {t:"p", text:`17.1 The Parties may sign this Agreement by Aadhaar-based electronic signature or any other electronic signature recognised under section 3A and the Second Schedule of the Information Technology Act, 2000. An electronically signed Agreement is as valid and binding as one signed in ink, and a contract formed electronically is valid under section 10A of that Act.${printedSign()?" DriveKaro executes this Agreement by the signature of its authorised signatory affixed to it and by issuing it to the Hirer for signing; the Hirer signs by Aadhaar eSign.":""}`},
     {t:"p", text:"17.2 The eSign certificate and audit trail, OTP and timestamp logs, the Handover Record and Return Record, messages exchanged by WhatsApp, SMS or email, payment records and Tracking Device data form part of the record of this Agreement. The Parties agree that they may be produced as electronic records under section 63 of the Bharatiya Sakshya Adhiniyam, 2023."},
     {t:"p", text:"17.3 DriveKaro shall send the Hirer a copy of the fully signed Agreement, with its audit trail, by email or WhatsApp promptly after signing."},
     {t:"p", text:"17.4 The Parties have chosen to execute this Agreement electronically without stamp paper. If stamp duty becomes payable on it under the Maharashtra Stamp Act, 1958, including for producing it in evidence, the Party producing it may pay the duty, and the Hirer shall reimburse the duty, but not any penalty."},
@@ -530,10 +530,42 @@ function buildAgreement(b){
   return {sections:T, car, calc:c, hasAddl};
 }
 
+// Turns a phone photo of a paper signature into a small PNG with a transparent background.
+async function cleanSignature(file){
+  const bmp=await createImageBitmap(file);
+  const scale=Math.min(1, 900/bmp.width, 300/bmp.height);
+  const w=Math.max(1,Math.round(bmp.width*scale)), h=Math.max(1,Math.round(bmp.height*scale));
+  const cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+  const cx=cv.getContext("2d"); cx.drawImage(bmp,0,0,w,h);
+  const im=cx.getImageData(0,0,w,h), d=im.data;
+  let minX=w,minY=h,maxX=-1,maxY=-1;
+  for(let i=0;i<d.length;i+=4){
+    const lum=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    if(lum>150){ d[i+3]=0; continue; }
+    const a=Math.min(255,Math.round((150-lum)*255/70)); d[i]=d[i+1]=d[i+2]=Math.min(d[i],d[i+1],d[i+2]) < 60 ? 0 : 20; d[i+3]=a;
+    const p=i/4, x=p%w, y=(p-x)/w; if(x<minX)minX=x; if(x>maxX)maxX=x; if(y<minY)minY=y; if(y>maxY)maxY=y;
+  }
+  if(maxX<0) throw new Error("No signature found in the photo. Use a dark pen on white paper.");
+  cx.putImageData(im,0,0);
+  const pad=6; minX=Math.max(0,minX-pad); minY=Math.max(0,minY-pad); maxX=Math.min(w-1,maxX+pad); maxY=Math.min(h-1,maxY+pad);
+  const cw=maxX-minX+1, ch=maxY-minY+1, f=Math.min(1,600/cw,200/ch);
+  const out=document.createElement("canvas"); out.width=Math.round(cw*f); out.height=Math.round(ch*f);
+  out.getContext("2d").drawImage(cv,minX,minY,cw,ch,0,0,out.width,out.height);
+  return out.toDataURL("image/png");
+}
+async function saveSignSettings(patch, msg){
+  const doc={...S.settings, ...patch};
+  if(!(await write("settings/business",doc))) return;
+  S.settings=doc; render(); toast(msg);
+}
+function printedSign(){ const s=S.settings; return s.owner_sign_mode==="printed" && s.owner_sign ? s.owner_sign : null; }
+function imgFormat(dataUrl){ return /^data:image\/jpe?g/i.test(dataUrl) ? "JPEG" : "PNG"; }
 function sigParties(b, A){
   const s=S.settings;
   const out=[["HIRER", `Aadhaar eSign by ${b.name||"________"}`]];
-  out.push([`FOR ${s.legal_name.toUpperCase()}`, `Aadhaar eSign by ${s.signatory||"________"}, Proprietor`]);
+  const img=printedSign();
+  out.push(img ? [`FOR ${s.legal_name.toUpperCase()}`, `${s.signatory||"________"}, Proprietor (authorised signatory)`, img]
+               : [`FOR ${s.legal_name.toUpperCase()}`, `Aadhaar eSign by ${s.signatory||"________"}, Proprietor`]);
   return out;
 }
 function agreementHTML(b){
@@ -547,7 +579,7 @@ function agreementHTML(b){
       else if(blk.t==="kv") h += (blk.title?`<p><b>${esc(blk.title)}</b></p>`:"") + `<table>${blk.rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${val(r[1])}</td></tr>`).join("")}</table>`;
       else h += `<${blk.t}>${blk.items.map(i=>`<li>${esc(i)}</li>`).join("")}</${blk.t}>`;
     }
-    if(sec.sig) h += `<div class="sigs">${sigParties(b,A).map(p=>`<div class="sig"><b>${esc(p[0])}</b>${esc(p[1])}<br>Timestamp and certificate added on signing</div>`).join("")}</div>`;
+    if(sec.sig) h += `<div class="sigs">${sigParties(b,A).map(p=>`<div class="sig"><b>${esc(p[0])}</b>${p[2]?`<img class="sigimg" src="${esc(p[2])}" alt="Signature">`:""}${esc(p[1])}<br>${p[2]?"Signed":"Timestamp and certificate added on signing"}</div>`).join("")}</div>`;
   }
   return h;
 }
@@ -589,13 +621,15 @@ function buildPdf(b, opts={}){
       ps.forEach((c,i)=>{
         const x=M+i*(bw+gap); doc.setDrawColor(150); doc.setLineDashPattern([1.5,1.5],0); doc.roundedRect(x,y,bw,34,2,2); doc.setLineDashPattern([],0);
         doc.setFont("helvetica","bold"); doc.setFontSize(8.5); doc.splitTextToSize(pdfSafe(c[0]),bw-8).forEach((l,j)=>doc.text(l,x+4,y+6+j*3.6));
+        if(c[2]){ try{ doc.addImage(c[2], imgFormat(c[2]), x+4, y+8, 40, 13); }catch(e){} }
         doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.splitTextToSize(pdfSafe(c[1]),bw-8).forEach((l,j)=>doc.text(l,x+4,y+24+j*3.4));
       }); y+=38;
     }
   }
   const n=doc.getNumberOfPages();
   for(let i=1;i<=n;i++){ doc.setPage(i); doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(120);
-    if(opts.esign){ doc.setDrawColor(210); doc.line(M,297-42,W-M,297-42); doc.setFontSize(7.5); doc.text("Hirer's Aadhaar eSign",M,297-38.5); doc.text(pdfSafe(`For ${s.legal_name}`),W-M,297-38.5,{align:"right"}); doc.setFontSize(8); } doc.text(pdfSafe(`${s.legal_name} | ${s.support_phone} | Agreement ${b.id}`),M,297-9); doc.text(`Page ${i} of ${n}`,W-M,297-9,{align:"right"}); doc.setTextColor(0); }
+    if(opts.esign){ doc.setDrawColor(210); doc.line(M,297-42,W-M,297-42); doc.setFontSize(7.5); doc.text("Hirer's Aadhaar eSign",M,297-38.5); doc.text(pdfSafe(`For ${s.legal_name}`),W-M,297-38.5,{align:"right"}); doc.setFontSize(8);
+      const im=printedSign(); if(im){ try{ doc.addImage(im, imgFormat(im), W-M-42, 297-36, 42, 14); }catch(e){} doc.setFontSize(7); doc.text("Authorised signatory",W-M,297-19,{align:"right"}); doc.setFontSize(8); } } doc.text(pdfSafe(`${s.legal_name} | ${s.support_phone} | Agreement ${b.id}`),M,297-9); doc.text(`Page ${i} of ${n}`,W-M,297-9,{align:"right"}); doc.setTextColor(0); }
   return doc.output("blob");
 }
 
@@ -1354,6 +1388,18 @@ function viewSettings(){
       ${fieldHTML("s_address","Business address",g("address"),{type:"textarea",wide:1})}
       ${fieldHTML("s_loc","Default handover location",g("designated_location"),{wide:1})}
     </div></fieldset>
+    <fieldset><legend>DriveKaro's signature</legend>
+      <p class="muted" style="font-size:14px;margin:0 0 8px">Choose <b>Printed</b> to put your signature on every agreement and send the eSign only to the customer (one Aadhaar eSign per booking). Sign on plain white paper with a dark pen and take a clear photo.</p>
+      <div class="grid">
+        <div class="field"><label for="s_signmode">How DriveKaro signs</label><select id="s_signmode">
+          <option value="printed" ${s.owner_sign_mode==="printed"?"selected":""}>Printed (only customer eSigns)</option>
+          <option value="aadhaar" ${s.owner_sign_mode!=="printed"?"selected":""}>Aadhaar eSign by DriveKaro too</option>
+        </select></div>
+        <div class="field"><label for="s_signfile">${s.owner_sign?"Replace signature photo":"Upload signature photo"}</label><input id="s_signfile" type="file" accept="image/*"></div>
+      </div>
+      ${s.owner_sign?`<div class="sigprev"><img class="sigimg" src="${s.owner_sign}" alt="Your saved signature"><button type="button" class="linkbtn" data-act="sign-remove">Remove signature</button></div>`:""}
+      ${s.owner_sign_mode==="printed"&&!s.owner_sign?`<p class="err" style="margin-top:8px">Upload your signature. Until then, agreements show an empty signature box for DriveKaro.</p>`:""}
+    </fieldset>
     <fieldset><legend>Default charges for new bookings</legend><div class="grid">${chargeFieldsHTML("sc_", {...DEFAULT_CHARGES, ...(s.charges||{})})}</div></fieldset>
     <fieldset><legend>Agreement terms</legend><div class="grid">
       ${num("s_nonret","Non-return after (hours)","non_return_hours","Recovery steps start after this")}
@@ -1827,6 +1873,7 @@ async function copy(text, done){
 }
 
 document.addEventListener("click", async e=>{
+  if(e.target.closest('[data-act="sign-remove"]')){ if(confirm("Remove your saved signature?")) saveSignSettings({owner_sign:""},"Signature removed."); return; }
   const t=e.target.closest("button"); if(!t) return;
   if(t.classList.contains("tab")){ const keepDraft = t.dataset.view==="new" && !S.editId; S.view=t.dataset.view; S.selected=null; S.carEdit=null; S.carView=null; S.custView=null; S.custEdit=null; S.confirmDelete=null; if(!keepDraft){ S.editId=null; S.draft=null; } render(); window.scrollTo(0,0); return; }
   if(t.dataset.pickcar){ pickCar(t.dataset.pickcar); return; }
@@ -1974,6 +2021,8 @@ document.addEventListener("keydown", e=>{ if(e.target.id==="f_phone" && e.key===
 document.addEventListener("change", e=>{
   if(e.target.id==="f_pickup"||e.target.id==="f_drop") refreshCarOptions();
   if(e.target.id==="f_deptype") showDepFields();
+  if(e.target.id==="s_signmode"){ saveSignSettings({owner_sign_mode:e.target.value}, e.target.value==="printed"?"Only the customer will get the eSign link.":"DriveKaro will also sign by Aadhaar eSign."); return; }
+  if(e.target.id==="s_signfile" && e.target.files?.[0]){ const f=e.target.files[0]; cleanSignature(f).then(url=>saveSignSettings({owner_sign:url, owner_sign_mode:"printed"},"Signature saved. It will print on new agreements.")).catch(err=>toast(err.message||"Could not read that photo.")); return; }
   if(e.target.id==="rep_month" && e.target.value){ S.repMonth=e.target.value; S.repRange="month"; render(); return; }
   if(e.target.id==="f_car"){ const car=S.fleet.find(c=>c.id===e.target.value); if(car){ const r=$("#f_rate"), d=$("#f_deposit"); if(r && (!r.value || r.dataset.auto)){ r.value=car.rate||""; r.dataset.auto="1"; } if(d && (!d.value || d.dataset.auto)){ d.value=car.deposit??""; d.dataset.auto="1"; } } }
   if(e.target.id==="f_rate"||e.target.id==="f_deposit") delete e.target.dataset.auto;
