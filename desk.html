@@ -320,6 +320,33 @@ details.more summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--a
 .gate-err{font-size:13.5px;color:var(--bad)}
 #signout{margin-left:8px}
 
+
+/* customers */
+.custsearch{position:relative}
+.dd-wrap{position:relative}
+.dd{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:8;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.14);max-height:340px;overflow:auto}
+.dd-row{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:11px 12px;cursor:pointer;min-height:52px}
+.dd-row:last-child{border-bottom:0}
+.dd-row:hover,.dd-row:focus-visible{background:var(--surface-2)}
+.dd-row small{display:block;font-size:12.5px;margin-top:2px}
+.dd-chips{flex:0 0 auto}
+.dd-new b{color:var(--accent)}
+.dd-empty{padding:12px;color:var(--muted);font-size:14px}
+.custcard{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:10px;margin-top:12px;padding:12px;border:1.5px solid var(--accent);background:var(--accent-soft);border-radius:10px}
+.custcard.new{border-style:dashed;background:var(--surface-2);border-color:var(--line)}
+.custcard.blocked{border-color:var(--bad);background:var(--bad-soft)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.subh{font:700 14px/1.3 var(--f-display);margin:18px 0 10px}
+.row.crow{grid-template-columns:minmax(0,1.1fr) minmax(0,.8fr) minmax(0,1.5fr)}
+.row.crow .chips{margin:0;justify-content:flex-end}
+@media (max-width:760px){
+  .row.crow{grid-template-columns:1fr;grid-template-areas:none}
+  .row.crow .who,.row.crow .when,.row.crow .chips{grid-area:auto;justify-content:flex-start}
+}
+.doclist{margin-top:12px}
+.docrow{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--line)}
+.doc-name{font-size:12.5px;overflow-wrap:anywhere}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -341,7 +368,8 @@ details.more summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--a
   </header>
   <nav class="tabs" aria-label="Sections">
     <button class="tab" data-view="bookings" id="t-bookings">Bookings</button>
-    <button class="tab" data-view="new" id="t-new">New booking</button>
+    <button class="tab" data-view="new" id="t-new">+ New</button>
+    <button class="tab" data-view="customers" id="t-customers">Customers</button>
     <button class="tab" data-view="fleet" id="t-fleet">Fleet</button>
     <button class="tab" data-view="settings" id="t-settings">Settings</button>
   </nav>

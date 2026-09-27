@@ -26,3 +26,12 @@ The old `/admin` dashboard is untouched.
 - One-time setup: run `supabase/desk_setup.sql` in Supabase → SQL Editor
 - Local dev: `npm run dev`, then open http://localhost:5173/desk.html
 - On a phone: open drivekaro.in/desk → Share → Add to Home Screen
+
+### Customers and KYC documents
+
+- Customers are stored in `desk_docs` (collection `customers`, id = 10-digit mobile).
+- In a new booking, type the mobile number: existing customers fill in automatically;
+  website enquiry customers (old `customers` table) are suggested too.
+- KYC files (DL, masked Aadhaar, address proof) upload from the customer profile to the
+  owner's Google Drive: `My Drive / DriveKaro Customer KYC / <Name - mobile>`.
+  Needs `VITE_GOOGLE_CLIENT_ID` (Google OAuth web client, Drive API enabled, scope `drive.file`).

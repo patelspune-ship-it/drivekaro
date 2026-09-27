@@ -4,6 +4,9 @@
 import { supabase } from "../supabaseClient.js";
 import { jsPDF } from "jspdf";
 import { createStore } from "./store.js";
+import { configureDrive, driveConfigured, driveConnected, preloadDrive, connectDrive, ensureCustomerFolder, shrinkImage, uploadFile, trashFile, folderUrl } from "./drive.js";
+
+configureDrive(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
 window.jspdf = { jsPDF };
 
@@ -69,7 +72,7 @@ const IDTYPES = ["Aadhaar (masked)","Passport","Voter ID","PAN"];
 
 /* ---------- state ---------- */
 const S = {
-  fleet:[], bookings:[], settings:JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
+  fleet:[], bookings:[], customers:[], custView:null, custEdit:null, custQuery:"", confirmDoc:null, confirmCustDel:null, formCust:null, webMatches:[], settings:JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
   view:"bookings", selected:null, filter:"active",
   editId:null, draft:null, carEdit:null, carView:null, detailTab:"agreement", confirmPay:null, confirmSettle:false, confirmDelete:null, confirmCar:null,
   db:null, dbState:"loading", downloads:null
@@ -135,7 +138,9 @@ async function startDesk(session){
   S.db=db; S.dbState="on"; render();
   const onErr = e => { setBanner(e && e.code==="invalid_argument" ? "Your account can't read the desk data. Check that the desk SQL has been run and your email is in the owners table." : "Couldn't load the latest data. Check your connection; it will retry."); };
   db.collection("fleet").onSnapshot(snap=>{ setBanner(""); S.fleet = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.make_model||"").localeCompare(b.make_model||"")); softRender(); }, onErr);
-  db.collection("bookings").onSnapshot(snap=>{ S.bookings = snap.docs.map(d=>({id:d.id,...d.data()})); softRender(); }, onErr);
+  db.collection("bookings").onSnapshot(snap=>{ S.bookings = snap.docs.map(d=>({id:d.id,...d.data()})); S._bkLoaded=true; softRender(); syncCustomersFromBookings(); }, onErr);
+  db.collection("customers").onSnapshot(snap=>{ S.customers = snap.docs.map(d=>({id:d.id,...d.data()})); S._custLoaded=true; softRender(); syncCustomersFromBookings(); }, onErr);
+  preloadDrive();
   db.doc("settings/business").onSnapshot(snap=>{ const d=snap.exists? snap.data():{}; S.settings = {...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), ...d, charges:{...DEFAULT_CHARGES, ...(d.charges||{})}}; softRender(); }, onErr);
 }
 async function boot(){
@@ -153,7 +158,12 @@ async function boot(){
   const { data:{ session } } = await supabase.auth.getSession();
   if(session) await startDesk(session); else showGate("");
 }
-function softRender(){ if(["new","settings"].includes(S.view) || S.carEdit){ refreshCarOptions(); updateSummary(); return; } render(); }
+function softRender(){
+  if(["new","settings"].includes(S.view) || S.carEdit || S.custEdit){ refreshCarOptions(); updateSummary(); return; }
+  if(S.view==="customers" && !S.custView){ const l=$("#custlist"); if(l){ l.innerHTML=custListHTML(); return; } }
+  if(S.view==="customers" && S.custView && ($("#doc_file")?.files?.length || S.uploading)) return;
+  render();
+}
 async function write(path, data){
   if(S.dbState!=="on") return true;
   try{ await S.db.doc(path).set(data); return true; }
@@ -591,6 +601,7 @@ function validate(b, forReady){
   if(b.email && !/^\S+@\S+\.\S+$/.test(b.email)) e.email="Enter a valid email or leave it blank.";
   if(b.aadhaar4 && !/^\d{4}$/.test(b.aadhaar4)) e.aadhaar4="Enter only the last 4 digits.";
   need("car_id","Choose a car.");
+  { const c=custById(normPhone(b.phone)); if(c && c.blocked) e.phone=`${c.name||"This customer"} is marked do not rent${c.block_reason?`: ${c.block_reason}`:""}.`; }
   need("pickup","Set the pickup date and time.");
   need("drop","Set the drop-off date and time.");
   if(b.pickup && b.drop && new Date(b.drop)<=new Date(b.pickup)) e.drop="Drop-off must be after pickup.";
@@ -630,6 +641,7 @@ function validate(b, forReady){
 function setTabs(){ document.querySelectorAll(".tab").forEach(t=>t.setAttribute("aria-current", t.dataset.view===S.view?"page":"false")); }
 function render(){
   setTabs();
+  if(S.view==="customers"){ $("#main").innerHTML=viewCustomers(); return; }
   const m=$("#main");
   if(S.view==="bookings") m.innerHTML = S.selected ? viewDetail() : viewList();
   else if(S.view==="new"){ m.innerHTML = viewForm(); updateSummary(); }
@@ -889,6 +901,7 @@ function viewDetail(){
       <div class="card">
         <div class="actions">
           <button class="btn" data-act="edit" ${["handed","returned"].includes(b.status)?"disabled":""}>Edit details and charges</button>
+          ${custOfBooking(b)?`<button class="btn" data-custview="${esc(custOfBooking(b).id)}">Customer profile</button>`:""}
           ${waButton(b.phone, summaryText(b), "WhatsApp booking details")}
           <button class="btn" data-act="copy-wa">Copy booking summary</button>
           ${b.status!=="cancelled" && !["handed","returned"].includes(b.status) ? `<button class="btn danger" data-act="cancel-booking">Cancel booking</button>`:""}
@@ -1013,7 +1026,7 @@ function pickCar(id){
 const FORM_MAP={name:"f_name",father:"f_father",dob:"f_dob",phone:"f_phone",alt_phone:"f_alt",email:"f_email",address:"f_address",emergency:"f_emergency",
   dl:"f_dl",dl_till:"f_dl_till",rto:"f_rto",id_type:"f_idtype",aadhaar4:"f_aadhaar4",
   addl_name:"f_addl_name",addl_dob:"f_addl_dob",addl_phone:"f_addl_phone",addl_dl:"f_addl_dl",addl_dl_till:"f_addl_dl_till",
-  car_id:"f_car",pickup:"f_pickup",drop:"f_drop",location:"f_location",rate:"f_rate",deposit:"f_deposit",paymode:"f_paymode",payref:"f_payref",
+  customer_id:"f_custid",car_id:"f_car",pickup:"f_pickup",drop:"f_drop",location:"f_location",rate:"f_rate",deposit:"f_deposit",paymode:"f_paymode",payref:"f_payref",
   odo:"f_odo",fuel:"f_fuel",keys:"f_keys",ext_damage:"f_ext",int_damage:"f_int",notes:"f_notes"};
 
 function viewForm(errs={}){
@@ -1021,6 +1034,10 @@ function viewForm(errs={}){
   const g=k=>b[k]??"";
   const charges = {...defaultCharges(), ...(b.charges||{})};
   const sub = t => `<span class="muted" style="font:400 13px var(--f-body)">${t}</span>`;
+  const fc = custById(b.customer_id) || (b.phone ? custById(normPhone(b.phone)) : null);
+  const kycErr = Object.keys(errs).some(k=>KYC_FIELDS.includes(k));
+  const showFields = (fc || g("phone")) && (!fc || kycMissing(b).length>0 || kycErr);
+  S.formCust = fc ? fc.id : (g("phone") ? "new:"+normPhone(g("phone")) : null);
   return `
   <div class="head-row"><h2>${S.editId?"Edit booking "+esc(S.editId):"New booking"}</h2>${S.editId?`<button class="btn sm" data-act="cancel-edit">Discard changes</button>`:""}</div>
   <form id="bform" class="form" novalidate>
@@ -1049,31 +1066,43 @@ function viewForm(errs={}){
           <div class="grid">${chargeFieldsHTML("fc_", charges)}</div>
         </details>
       </fieldset>
-      <fieldset><legend>4 · Customer</legend><div class="grid">
-        ${fieldHTML("f_name","Full name (as on licence)",g("name"),{req:1,err:errs.name,attrs:'autocomplete="off"'})}
-        ${fieldHTML("f_father","Father's / spouse's name",g("father"),{err:errs.father})}
-        ${fieldHTML("f_dob","Date of birth",g("dob"),{type:"date",err:errs.dob})}
-        ${fieldHTML("f_phone","Mobile",g("phone"),{req:1,type:"tel",err:errs.phone,attrs:'inputmode="tel" placeholder="98220 12345"'})}
-        ${fieldHTML("f_alt","Alternate mobile",g("alt_phone"),{type:"tel",err:errs.alt_phone,attrs:'inputmode="tel"'})}
-        ${fieldHTML("f_email","Email",g("email"),{type:"email",err:errs.email})}
-        ${fieldHTML("f_address","Permanent address",g("address"),{type:"textarea",wide:1,err:errs.address})}
-        ${fieldHTML("f_emergency","Emergency contact (name, relation, number)",g("emergency"),{wide:1,err:errs.emergency})}
-      </div></fieldset>
-      <fieldset><legend>5 · Licence and ID</legend><div class="grid">
-        ${fieldHTML("f_dl","Driving licence number",g("dl"),{err:errs.dl,attrs:'placeholder="MH12 20200012345" style="text-transform:uppercase"'})}
-        ${fieldHTML("f_dl_till","Licence valid till",g("dl_till"),{type:"date",err:errs.dl_till})}
-        ${fieldHTML("f_rto","Issuing RTO",g("rto"),{attrs:'placeholder="Pune (MH12)"'})}
-        ${selectHTML("f_idtype","Photo ID type",g("id_type")||IDTYPES[0],IDTYPES.map(x=>[x,x]))}
-        ${fieldHTML("f_aadhaar4","ID number, last 4 digits",g("aadhaar4"),{err:errs.aadhaar4,hint:"Only the last 4. The full Aadhaar is entered by the customer on the eSign page.",attrs:'inputmode="numeric" maxlength="4"'})}
-      </div></fieldset>
-      <fieldset><legend>6 · Additional driver ${sub("(leave blank if none)")}</legend><div class="grid">
+      <fieldset><legend>4 · Customer</legend>
+        <div class="field wide custsearch">
+          <label for="f_phone">Customer mobile <em>*</em></label>
+          <div class="dd-wrap"><input id="f_phone" type="tel" inputmode="tel" autocomplete="off" placeholder="Type mobile number or name" value="${esc(fc?fmtPhone(fc.phone):g("phone"))}" ${errs.phone?'aria-invalid="true"':""}>
+          <div id="custdd" class="dd" role="listbox" hidden></div></div>
+          ${errs.phone?`<span class="err">${esc(errs.phone)}</span>`:`<span class="hint">Existing customers fill in automatically. New number? Pick "Add new customer".</span>`}
+        </div>
+        <input type="hidden" id="f_custid" value="${esc(fc?fc.id:"")}">
+        <div id="custcard">${fc?custCardHTML(fc):(g("phone")?custCardHTML(null,true):"")}</div>
+        <div id="custfields" ${showFields?"":"hidden"}>
+          <div class="grid" style="margin-top:12px">
+            ${fieldHTML("f_name","Full name (as on licence)",g("name"),{req:1,err:errs.name,attrs:'autocomplete="off"'})}
+            ${fieldHTML("f_father","Father's / spouse's name",g("father"),{err:errs.father})}
+            ${fieldHTML("f_dob","Date of birth",g("dob"),{type:"date",err:errs.dob})}
+            ${fieldHTML("f_alt","Alternate mobile",g("alt_phone"),{type:"tel",err:errs.alt_phone,attrs:'inputmode="tel"'})}
+            ${fieldHTML("f_email","Email",g("email"),{type:"email",err:errs.email})}
+            ${fieldHTML("f_address","Permanent address",g("address"),{type:"textarea",wide:1,err:errs.address})}
+            ${fieldHTML("f_emergency","Emergency contact (name, relation, number)",g("emergency"),{wide:1,err:errs.emergency})}
+          </div>
+          <h4 class="subh">Licence and ID</h4>
+          <div class="grid">
+            ${fieldHTML("f_dl","Driving licence number",g("dl"),{err:errs.dl,attrs:'placeholder="MH12 20200012345" style="text-transform:uppercase"'})}
+            ${fieldHTML("f_dl_till","Licence valid till",g("dl_till"),{type:"date",err:errs.dl_till})}
+            ${fieldHTML("f_rto","Issuing RTO",g("rto"),{attrs:'placeholder="Pune (MH12)"'})}
+            ${selectHTML("f_idtype","Photo ID type",g("id_type")||IDTYPES[0],IDTYPES.map(x=>[x,x]))}
+            ${fieldHTML("f_aadhaar4","ID number, last 4 digits",g("aadhaar4"),{err:errs.aadhaar4,hint:"Only the last 4. The full Aadhaar is entered by the customer on the eSign page.",attrs:'inputmode="numeric" maxlength="4"'})}
+          </div>
+        </div>
+      </fieldset>
+      <fieldset><legend>5 · Additional driver ${sub("(leave blank if none)")}</legend><div class="grid">
         ${fieldHTML("f_addl_name","Full name",g("addl_name"))}
         ${fieldHTML("f_addl_dob","Date of birth",g("addl_dob"),{type:"date",err:errs.addl_dob})}
         ${fieldHTML("f_addl_phone","Mobile",g("addl_phone"),{type:"tel",err:errs.addl_phone})}
         ${fieldHTML("f_addl_dl","Driving licence number",g("addl_dl"),{err:errs.addl_dl,attrs:'style="text-transform:uppercase"'})}
         ${fieldHTML("f_addl_dl_till","Licence valid till",g("addl_dl_till"),{type:"date",err:errs.addl_dl_till})}
       </div></fieldset>
-      <fieldset><legend>7 · Payment and handover ${sub("(can be filled at pickup)")}</legend><div class="grid">
+      <fieldset><legend>6 · Payment and handover ${sub("(can be filled at pickup)")}</legend><div class="grid">
         ${selectHTML("f_paymode","Payment mode",g("paymode"),[["",""],...PAYMODES.map(p=>[p,p])])}
         ${fieldHTML("f_payref","Payment reference",g("payref"),{hint:"UPI or bank reference, if paid"})}
         ${fieldHTML("f_odo","Odometer (km)",g("odo"),{type:"number",attrs:'min="0" inputmode="numeric"'})}
@@ -1279,6 +1308,279 @@ function viewSettings(){
 }
 
 /* ---------- actions ---------- */
+/* ---------- customers ---------- */
+const KYC_FIELDS = ["name","father","dob","alt_phone","email","address","emergency","dl","dl_till","rto","id_type","aadhaar4"];
+const KYC_REQUIRED = [["name","Full name"],["father","Father's / spouse's name"],["dob","Date of birth"],["address","Address"],["emergency","Emergency contact"],["dl","Licence number"],["dl_till","Licence expiry"],["aadhaar4","ID last 4 digits"]];
+const DOC_TYPES = ["DL front","DL back","Aadhaar (masked) front","Aadhaar (masked) back","Address proof","PAN","Passport","Selfie with DL","Other"];
+const DOC_CHECK = [["DL front",["DL front"]],["DL back",["DL back"]],["ID / address proof",["Aadhaar (masked) front","Aadhaar (masked) back","Address proof","Passport"]]];
+const normPhone = p => String(p||"").replace(/\D/g,"").slice(-10);
+const fmtPhone = p => { const d=normPhone(p); return d.length===10 ? `${d.slice(0,5)} ${d.slice(5)}` : String(p||""); };
+function custById(id){ return id ? S.customers.find(c=>c.id===id) || null : null; }
+function custOfBooking(b){ return custById(b.customer_id) || custById(normPhone(b.phone)); }
+function custBookings(c){ return S.bookings.filter(b=>b.customer_id===c.id || normPhone(b.phone)===c.id); }
+function kycMissing(c){ return KYC_REQUIRED.filter(([k])=>!String(c?.[k]??"").trim()).map(([,l])=>l); }
+function docCheck(c){ const types=new Set((c.docs||[]).map(d=>d.type)); return DOC_CHECK.map(([label,opts])=>({label, ok:opts.some(o=>types.has(o))})); }
+function dlState(c){ if(!c.dl_till) return null; const d=new Date(c.dl_till+"T23:59"); if(d<new Date()) return {cls:"s-cancelled",label:"DL expired"}; if((d-new Date())/864e5<60) return {cls:"s-sent",label:"DL expires soon"}; return {cls:"s-signed",label:"DL valid"}; }
+function custChips(c){
+  const out=[]; if(c.blocked) out.push(`<span class="pill s-cancelled">Do not rent</span>`);
+  const miss=kycMissing(c); out.push(miss.length?`<span class="pill s-sent">KYC: ${miss.length} missing</span>`:`<span class="pill s-signed">KYC complete</span>`);
+  const dc=docCheck(c), n=dc.filter(x=>x.ok).length; out.push(`<span class="pill ${n===dc.length?"s-signed":"s-draft"}">Docs ${n}/${dc.length}</span>`);
+  const dl=dlState(c); if(dl && dl.cls!=="s-signed") out.push(`<span class="pill ${dl.cls}">${dl.label}</span>`);
+  return out.join("");
+}
+
+// Customer record built from a booking form (only non-empty values overwrite what's saved).
+async function upsertCustomerFrom(f){
+  const id=normPhone(f.phone); if(id.length!==10) return null;
+  const prev=custById(id)||{}; const now=new Date().toISOString();
+  const doc={...prev, id, phone:fmtPhone(f.phone), created_at:prev.created_at||now, updated_at:now, source:prev.source||"desk"};
+  for(const k of KYC_FIELDS){ const v=String(f[k]??"").trim(); if(v) doc[k]= k==="dl" ? v.toUpperCase() : v; }
+  if(!(await write("customers/"+id, doc))) return null;
+  localUpsert(S.customers, doc); return doc;
+}
+
+// One-time: create customer records from bookings made before customer profiles existed.
+async function syncCustomersFromBookings(){
+  if(S._synced || !S._custLoaded || !S._bkLoaded) return; S._synced=true;
+  const latest=new Map();
+  for(const b of S.bookings){ const id=normPhone(b.phone); if(id.length!==10 || custById(id)) continue; const p=latest.get(id); if(!p || String(b.updated_at||"")>String(p.updated_at||"")) latest.set(id,b); }
+  for(const b of latest.values()){ const c=await upsertCustomerFrom(b); if(c && !b.customer_id){ await write("bookings/"+b.id,{...b, customer_id:c.id}); } }
+  if(latest.size) softRender();
+}
+
+/* website enquiries (old customers table), used only to suggest name/email */
+let webTimer=null;
+function searchWebsite(digits){
+  clearTimeout(webTimer);
+  if(digits.length<5){ S.webMatches=[]; return; }
+  webTimer=setTimeout(async ()=>{
+    try{
+      const { data, error } = await supabase.from("customers").select("full_name, phone, email").ilike("phone", `%${digits}%`).limit(5);
+      if(error) return;
+      S.webMatches=(data||[]).filter(w=>normPhone(w.phone).length===10 && !custById(normPhone(w.phone)));
+      renderCustDropdown();
+    }catch(e){ /* optional source */ }
+  },250);
+}
+
+/* booking form: mobile search */
+function custMatches(term){
+  const t=term.trim().toLowerCase(), d=term.replace(/\D/g,"");
+  if(!t) return [];
+  return S.customers.filter(c=> (d.length>=3 && c.id.includes(d)) || (/[a-z]/i.test(t) && (c.name||"").toLowerCase().includes(t)) ).sort((a,b)=>String(b.updated_at||"").localeCompare(String(a.updated_at||""))).slice(0,6);
+}
+function renderCustDropdown(){
+  const dd=$("#custdd"), inp=$("#f_phone"); if(!dd||!inp) return;
+  if(document.activeElement!==inp){ dd.hidden=true; return; }
+  const term=inp.value, d=normPhone(term), ms=custMatches(term);
+  const exact=ms.find(c=>c.id===d);
+  const rows=ms.map(c=>`<button type="button" class="dd-row" data-pickcust="${esc(c.id)}"><span><b>${esc(c.name||"No name")}</b><small class="muted num">${esc(fmtPhone(c.phone))}${c.dl?` · ${esc(c.dl)}`:""}</small></span><span class="dd-chips">${c.blocked?`<span class="pill s-cancelled">Do not rent</span>`:kycMissing(c).length?`<span class="pill s-sent">KYC incomplete</span>`:`<span class="pill s-signed">KYC complete</span>`}</span></button>`);
+  (S.webMatches||[]).forEach(w=>rows.push(`<button type="button" class="dd-row" data-webcust="${esc(normPhone(w.phone))}" data-name="${esc(w.full_name||"")}" data-email="${esc(w.email||"")}"><span><b>${esc(w.full_name||"Website customer")}</b><small class="muted num">${esc(fmtPhone(w.phone))} · from website enquiry</small></span><span class="dd-chips"><span class="pill s-draft">New</span></span></button>`));
+  if(d.length===10 && !exact) rows.push(`<button type="button" class="dd-row dd-new" data-newcust="${d}"><span><b>+ Add new customer</b><small class="muted num">${esc(fmtPhone(d))}</small></span></button>`);
+  if(!rows.length){ dd.innerHTML = d.length && d.length<10 ? `<div class="dd-empty">Keep typing the 10-digit number…</div>` : `<div class="dd-empty">Type a mobile number or name</div>`; }
+  else dd.innerHTML=rows.join("");
+  dd.hidden=false;
+}
+function setKycFields(src){ for(const k of KYC_FIELDS){ const el=$("#"+FORM_MAP[k]); if(el) el.value = k==="id_type" ? (src[k]||IDTYPES[0]) : (src[k]??""); } }
+function custCardHTML(c, isNew){
+  if(isNew) return `<div class="custcard new"><div><b>New customer</b><div class="muted" style="font-size:13px">Fill the details below. A customer profile is created when you save the booking.</div></div><button type="button" class="btn sm" data-act="cust-change">Change</button></div>`;
+  if(!c) return "";
+  const miss=kycMissing(c), n=custBookings(c).filter(b=>b.status!=="cancelled").length;
+  return `<div class="custcard ${c.blocked?"blocked":""}">
+    <div style="min-width:0"><b>${esc(c.name||"No name")}</b><div class="muted num" style="font-size:13px">${esc(fmtPhone(c.phone))} · ${n} previous booking${n===1?"":"s"}</div>
+      <div class="chips">${custChips(c)}</div>
+      ${c.blocked?`<div class="err" style="margin-top:6px">Marked do not rent${c.block_reason?`: ${esc(c.block_reason)}`:""}</div>`:""}
+      ${miss.length?`<div class="warnline" style="margin-top:6px">Missing: ${esc(miss.join(", "))}</div>`:""}</div>
+    <div class="actions"><button type="button" class="btn sm" data-act="cust-fields">${miss.length?"Fill details":"Edit details"}</button><button type="button" class="btn sm" data-custview="${esc(c.id)}" data-keepdraft="1">Profile</button><button type="button" class="btn sm" data-act="cust-change">Change</button></div>
+  </div>`;
+}
+function applyCustomer(c){
+  setKycFields(c); $("#f_custid").value=c.id; $("#f_phone").value=fmtPhone(c.phone);
+  $("#custcard").innerHTML=custCardHTML(c); $("#custfields").hidden = kycMissing(c).length===0;
+  $("#custdd").hidden=true; S.formCust=c.id; updateSummary();
+}
+function startNewCustomer(phone, name, email){
+  setKycFields({}); $("#f_custid").value=""; $("#f_phone").value=fmtPhone(phone);
+  if(name) $("#f_name").value=name; if(email) $("#f_email").value=email;
+  $("#custcard").innerHTML=custCardHTML(null,true); $("#custfields").hidden=false; $("#custdd").hidden=true; S.formCust="new:"+normPhone(phone);
+  (name? $("#f_father") : $("#f_name")).focus(); updateSummary();
+}
+function clearCustomer(){
+  setKycFields({}); $("#f_custid").value=""; $("#f_phone").value=""; $("#custcard").innerHTML=""; $("#custfields").hidden=true; S.formCust=null;
+  $("#f_phone").focus(); renderCustDropdown();
+}
+function onPhoneInput(){
+  const d=normPhone($("#f_phone").value);
+  if(S.formCust && S.formCust!==d && S.formCust!=="new:"+d){ // number changed after picking someone
+    setKycFields({}); $("#f_custid").value=""; $("#custcard").innerHTML=""; $("#custfields").hidden=true; S.formCust=null;
+  }
+  if(!S.formCust && d.length===10){ const c=custById(d); if(c){ applyCustomer(c); return; } }
+  searchWebsite(d); renderCustDropdown();
+}
+
+/* customers tab */
+function viewCustomers(){
+  if(S.custEdit) return viewCustForm();
+  if(S.custView){ const c=custById(S.custView); if(c) return viewCustProfile(c); S.custView=null; }
+  return `
+  <div class="head-row"><div><h2>Customers</h2><div class="muted" style="font-size:14px">${S.customers.length} customer${S.customers.length===1?"":"s"}. Profiles fill in automatically from bookings.</div></div><button class="btn primary" data-act="add-customer">+ Add customer</button></div>
+  <div class="field" style="margin-bottom:12px"><label for="cust_q" class="sr">Search customers</label><input id="cust_q" type="search" placeholder="Search by name, mobile or licence no." value="${esc(S.custQuery||"")}" autocomplete="off"></div>
+  <div class="list" id="custlist">${custListHTML()}</div>`;
+}
+function custListHTML(){
+  if(S.dbState==="loading" || !S._custLoaded) return `<div class="empty">Loading customers…</div>`;
+  const t=(S.custQuery||"").trim().toLowerCase(), d=t.replace(/\D/g,"");
+  const list=S.customers.filter(c=>!t || (c.name||"").toLowerCase().includes(t) || (d.length>=3 && c.id.includes(d)) || (c.dl||"").toLowerCase().replace(/\s/g,"").includes(t.replace(/\s/g,"")))
+    .sort((a,b)=>String(b.updated_at||"").localeCompare(String(a.updated_at||"")));
+  if(!list.length) return `<div class="empty"><h3>${t?"No match":"No customers yet"}</h3>${t?"Try another name or number.":"Customers appear here when you save a booking, or add one now."}</div>`;
+  return list.map(c=>{ const bk=custBookings(c).filter(b=>b.status!=="cancelled"); const last=bk.map(b=>b.pickup).sort().slice(-1)[0];
+    return `<button class="row crow" data-custview="${esc(c.id)}">
+      <span class="who"><b>${esc(c.name||"No name")}</b><small class="num">${esc(fmtPhone(c.phone))}</small></span>
+      <span class="when num"><small>${bk.length} booking${bk.length===1?"":"s"}${last?` · last ${esc(fmtD(last))}`:""}</small></span>
+      <span class="chips">${custChips(c)}</span>
+    </button>`; }).join("");
+}
+function viewCustProfile(c){
+  const bk=custBookings(c).sort((a,b)=>new Date(b.pickup)-new Date(a.pickup));
+  const live=bk.filter(b=>b.status!=="cancelled");
+  const paid=live.reduce((s,b)=>s+ledger(b).settled,0), due=live.filter(b=>["handed","returned"].includes(b.status)).reduce((s,b)=>s+Math.max(0,ledger(b).balance),0);
+  const days=live.filter(b=>["handed","returned"].includes(b.status)).reduce((s,b)=>s+calc(b).days,0);
+  const row=(k,v)=>`<div><dt>${k}</dt><dd>${v||"—"}</dd></div>`;
+  const miss=kycMissing(c);
+  return `
+  <div class="head-row">
+    <div><button class="btn sm" data-act="close-cust">← Customers</button></div>
+    <div class="actions"><button class="btn" data-act="edit-cust">Edit</button>${c.blocked?"":`<button class="btn primary" data-act="book-cust" data-cust="${esc(c.id)}">New booking</button>`}</div>
+  </div>
+  <div class="profile">
+    <div class="card profile-top">
+      <div style="min-width:0"><h2 style="font-size:24px">${esc(c.name||"No name")}</h2><div class="muted num">${esc(fmtPhone(c.phone))}${c.email?` · ${esc(c.email)}`:""}</div><div class="chips" style="margin-top:8px">${custChips(c)}</div></div>
+      <div class="actions profile-rate">${waButton(c.phone, `Hello ${c.name||""}, this is ${S.settings.business_name}.`, "WhatsApp", "btn sm")}</div>
+    </div>
+    ${c.blocked?`<div class="banner" style="margin:0;background:var(--bad-soft);color:var(--bad)">Do not rent${c.block_reason?`: ${esc(c.block_reason)}`:""}</div>`:""}
+    ${miss.length?`<div class="banner" style="margin:0">Missing for the agreement: ${esc(miss.join(", "))}</div>`:""}
+    <div class="profile-grid">
+      <div class="card"><h3>Personal</h3><dl class="kv-grid">
+        ${row("Father's / spouse's name", esc(c.father))}
+        ${row("Date of birth", esc(fmtD(c.dob)) + (c.dob?` <span class="muted">(${ageOn(c.dob,new Date())} yrs)</span>`:""))}
+        ${row("Alternate mobile", esc(c.alt_phone))}
+        ${row("Email", esc(c.email))}
+        ${row("Emergency contact", esc(c.emergency))}
+        ${row("Address", esc(c.address))}
+      </dl></div>
+      <div class="card"><h3>Licence and ID</h3><dl class="kv-grid">
+        ${row("Driving licence no.", esc(c.dl))}
+        ${row("Licence valid till", c.dl_till? `${esc(fmtD(c.dl_till))} ${dlState(c)?`<span class="pill ${dlState(c).cls}">${dlState(c).label}</span>`:""}`:"")}
+        ${row("Issuing RTO", esc(c.rto))}
+        ${row("Photo ID", c.aadhaar4? `${esc(c.id_type||"Aadhaar (masked)")}, XXXX ${esc(c.aadhaar4)}`:"")}
+      </dl></div>
+      <div class="card"><h3>History</h3><dl class="kv-grid num">
+        ${row("Bookings", String(live.length))}
+        ${row("Days rented", String(days))}
+        ${row("Total paid", inr(paid))}
+        ${row("Outstanding", due?`<span class="err">${inr(due)}</span>`:inr(0))}
+        ${row("Customer since", esc(fmtD(c.created_at)))}
+      </dl>${c.notes?`<p class="note" style="margin:10px 0 0">${esc(c.notes)}</p>`:""}</div>
+    </div>
+    ${docsSectionHTML(c)}
+    <div><h3 style="font-size:17px;margin:4px 0 10px">Bookings</h3>
+      <div class="list">${bk.length? bk.map(rowHTML).join("") : `<div class="empty">No bookings yet.</div>`}</div></div>
+    ${bk.length?"":`<div>${S.confirmCustDel===c.id?`<div class="confirm">Delete this customer? Their files stay in Google Drive. <button class="btn sm danger" data-act="del-cust">Delete</button><button class="btn sm" data-act="keep-cust">Keep</button></div>`:`<button class="btn danger" data-act="ask-del-cust">Delete customer</button>`}</div>`}
+  </div>`;
+}
+function docsSectionHTML(c){
+  const docs=(c.docs||[]).slice().sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+  const checks=docCheck(c).map(x=>`<span class="pill ${x.ok?"s-signed":"s-draft"}">${esc(x.label)}${x.ok?"":" missing"}</span>`).join("");
+  let body;
+  if(!driveConfigured()) body=`<p class="note" style="margin:0">Google Drive isn't set up yet. Once the Google client ID is added to Vercel, you can upload DL, Aadhaar and address proof here.</p>`;
+  else if(!driveConnected()) body=`<div class="actions"><button class="btn primary" data-act="drive-connect">Connect Google Drive</button></div><p class="note" style="margin:10px 0 0">Sign in with the Google account where DriveKaro's KYC files should be kept. Files go to <b>My Drive › DriveKaro Customer KYC › ${esc(c.name||"Customer")} - ${esc(c.id)}</b>.</p>`;
+  else body=`<div class="grid">
+      ${selectHTML("doc_type","Document",S.docType||DOC_TYPES[0],DOC_TYPES.map(x=>[x,x]))}
+      <div class="field"><label for="doc_file">File (photo or PDF)</label><input id="doc_file" type="file" accept="image/*,application/pdf"></div>
+    </div>
+    <div class="actions" style="margin-top:10px"><button class="btn primary" data-act="upload-doc" ${S.uploading?"disabled":""}>${S.uploading?"Uploading…":"Upload to Drive"}</button>${c.drive_folder_id?`<a class="btn sm" href="${esc(folderUrl(c.drive_folder_id))}" target="_blank" rel="noopener">Open folder in Drive</a>`:""}</div>
+    <p class="note" style="margin:10px 0 0">For Aadhaar, upload the masked Aadhaar (only last 4 digits visible), downloadable from the UIDAI site.</p>`;
+  return `<div class="card"><div class="paper-bar" style="margin:0 0 10px"><h3 style="margin:0">KYC documents</h3><div class="chips">${checks}</div></div>
+    ${body}
+    ${docs.length?`<div class="doclist">${docs.map(d=>`<div class="docrow"><div style="min-width:0"><b>${esc(d.type)}</b><small class="muted"> · ${esc(fmtD(d.at))}${d.size?` · ${Math.max(1,Math.round(d.size/1024))} KB`:""}</small><div class="muted doc-name">${esc(d.name)}</div></div>
+      <div class="actions"><a class="btn sm" href="${esc(d.link||"")}" target="_blank" rel="noopener">Open</a>${S.confirmDoc===d.id?`<button class="btn sm danger" data-act="del-doc" data-id="${esc(d.id)}">Confirm remove</button><button class="btn sm" data-act="keep-doc">Keep</button>`:`<button class="btn sm" data-act="ask-del-doc" data-id="${esc(d.id)}">Remove</button>`}</div></div>`).join("")}</div>`:`<p class="muted" style="font-size:14px;margin:12px 0 0">No documents uploaded yet.</p>`}
+  </div>`;
+}
+function viewCustForm(){
+  const isNew=S.custEdit==="new"; const c=isNew?{id_type:IDTYPES[0]}:(custById(S.custEdit)||{});
+  const g=k=>c[k]??"";
+  return `
+  <div class="head-row"><h2>${isNew?"Add customer":"Edit "+esc(c.name||"customer")}</h2><button class="btn sm" data-act="close-custform">Cancel</button></div>
+  <form id="custform" novalidate>
+    <fieldset><legend>Customer</legend><div class="grid">
+      ${isNew?fieldHTML("k_phone","Mobile",fmtPhone(S.newCustPhone||""),{req:1,type:"tel",attrs:'inputmode="tel"'}):`<div class="field"><label>Mobile</label><div class="num" style="padding:10px 0">${esc(fmtPhone(c.phone))}</div><span class="hint">To use a different number, add a new customer.</span></div>`}
+      ${fieldHTML("k_name","Full name (as on licence)",g("name"),{req:1})}
+      ${fieldHTML("k_father","Father's / spouse's name",g("father"))}
+      ${fieldHTML("k_dob","Date of birth",g("dob"),{type:"date"})}
+      ${fieldHTML("k_alt","Alternate mobile",g("alt_phone"),{type:"tel"})}
+      ${fieldHTML("k_email","Email",g("email"),{type:"email"})}
+      ${fieldHTML("k_address","Permanent address",g("address"),{type:"textarea",wide:1})}
+      ${fieldHTML("k_emergency","Emergency contact (name, relation, number)",g("emergency"),{wide:1})}
+    </div></fieldset>
+    <fieldset><legend>Licence and ID</legend><div class="grid">
+      ${fieldHTML("k_dl","Driving licence number",g("dl"),{attrs:'style="text-transform:uppercase"'})}
+      ${fieldHTML("k_dl_till","Licence valid till",g("dl_till"),{type:"date"})}
+      ${fieldHTML("k_rto","Issuing RTO",g("rto"))}
+      ${selectHTML("k_idtype","Photo ID type",g("id_type")||IDTYPES[0],IDTYPES.map(x=>[x,x]))}
+      ${fieldHTML("k_aadhaar4","ID number, last 4 digits",g("aadhaar4"),{attrs:'inputmode="numeric" maxlength="4"'})}
+    </div></fieldset>
+    <fieldset><legend>Notes and status</legend><div class="grid">
+      ${fieldHTML("k_notes","Internal notes",g("notes"),{type:"textarea",wide:1,hint:"Only you see this."})}
+      ${selectHTML("k_blocked","Rent to this customer?",c.blocked?"no":"yes",[["yes","Yes"],["no","No, mark do not rent"]])}
+      ${fieldHTML("k_reason","Reason (if do not rent)",g("block_reason"))}
+    </div></fieldset>
+    <div id="custerr"></div>
+    <div class="actions"><button type="submit" class="btn primary">Save customer</button></div>
+  </form>`;
+}
+async function saveCustomerForm(){
+  const v=id=>($("#"+id)?.value??"").trim();
+  const isNew=S.custEdit==="new"; const errs=[];
+  const id=isNew? normPhone(v("k_phone")) : S.custEdit;
+  if(isNew && !PHONE_RE.test(v("k_phone"))) errs.push("Enter a 10-digit Indian mobile number.");
+  if(isNew && custById(id)) errs.push("A customer with this mobile number already exists.");
+  if(!v("k_name")) errs.push("Enter the customer's name.");
+  if(v("k_aadhaar4") && !/^\d{4}$/.test(v("k_aadhaar4"))) errs.push("ID number: enter only the last 4 digits.");
+  if(v("k_email") && !/^\S+@\S+\.\S+$/.test(v("k_email"))) errs.push("Enter a valid email or leave it blank.");
+  if(errs.length){ $("#custerr").innerHTML=`<div class="errors" style="margin-bottom:12px"><ul>${errs.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`; return; }
+  const prev=isNew?{}:(custById(id)||{}); const now=new Date().toISOString();
+  const doc={...prev, id, phone: isNew? fmtPhone(v("k_phone")) : prev.phone, name:v("k_name"), father:v("k_father"), dob:v("k_dob"), alt_phone:v("k_alt"), email:v("k_email"), address:v("k_address"), emergency:v("k_emergency"),
+    dl:v("k_dl").toUpperCase(), dl_till:v("k_dl_till"), rto:v("k_rto"), id_type:v("k_idtype"), aadhaar4:v("k_aadhaar4"), notes:v("k_notes"), blocked:v("k_blocked")==="no", block_reason:v("k_blocked")==="no"?v("k_reason"):"",
+    created_at:prev.created_at||now, updated_at:now, source:prev.source||"desk"};
+  if(!(await write("customers/"+id, doc))) return;
+  localUpsert(S.customers, doc); S.custEdit=null; S.custView=id; S.newCustPhone=""; render(); window.scrollTo(0,0); toast("Customer saved.");
+}
+async function uploadDoc(c){
+  const input=$("#doc_file"); const file=input?.files?.[0];
+  if(!file){ toast("Choose a photo or PDF first."); return; }
+  if(file.size>25*1024*1024){ toast("That file is over 25 MB. Choose a smaller one."); return; }
+  const type=$("#doc_type").value; S.docType=type;
+  S.uploading=true; render();
+  try{
+    const meta=S.driveMeta || (S.driveMeta = (await S.db.doc("meta/drive").get()).data() || {});
+    const {rootId, folderId} = await ensureCustomerFolder({ rootId:meta.root_id, folderId:c.drive_folder_id, folderName:`${c.name||"Customer"} - ${c.id}` });
+    if(rootId!==meta.root_id){ S.driveMeta={...meta, root_id:rootId}; await S.db.doc("meta/drive").set(S.driveMeta); }
+    const small=await shrinkImage(file);
+    const ext=(small.name.match(/\.(\w+)$/)||[,"pdf"])[1].toLowerCase();
+    const f=await uploadFile(small, `${type} - ${c.name||c.id} - ${toLocalInput().slice(0,10)}.${ext}`, folderId);
+    const fresh=custById(c.id)||c;
+    const entry={id:f.id, type, name:f.name, link:f.webViewLink, mime:f.mimeType, size:Number(f.size)||small.size, at:new Date().toISOString()};
+    const doc={...fresh, drive_folder_id:folderId, docs:[...(fresh.docs||[]), entry], updated_at:new Date().toISOString()};
+    if(await write("customers/"+c.id, doc)){ localUpsert(S.customers, doc); toast(`${type} uploaded to Drive.`); }
+  }catch(e){ toast(e.message || "Upload failed. Try again."); }
+  S.uploading=false; render();
+}
+async function removeDoc(c, fileId){
+  try{ await trashFile(fileId); }catch(e){ if(e.code==="auth"){ toast(e.message); render(); return; } toast("Couldn't remove it from Drive: "+e.message); return; }
+  const doc={...c, docs:(c.docs||[]).filter(d=>d.id!==fileId), updated_at:new Date().toISOString()};
+  if(await write("customers/"+c.id, doc)){ localUpsert(S.customers, doc); S.confirmDoc=null; render(); toast("Removed. It's in Drive's bin for 30 days."); }
+}
+
 async function saveBooking(asDraft){
   const f=readForm();
   const errsFull=validate({...f,id:S.editId},true);
@@ -1290,7 +1592,8 @@ async function saveBooking(asDraft){
   let status = prev?.status || "draft";
   if(["draft","ready"].includes(status)) status = (!asDraft && complete) ? "ready" : "draft";
   const id = prev?.id || newId();
-  const doc = {...(prev||{}), ...f, id, status,
+  const cust = await upsertCustomerFrom(f); if(cust) f.customer_id = cust.id;
+  const doc = {...(prev||{}), ...f, phone: fmtPhone(f.phone), id, status,
     rate:f.rate===""?"":Number(f.rate), deposit:f.deposit===""?"":Number(f.deposit),
     car_snapshot: car ? {make_model:car.make_model, plate:car.plate, colour:car.colour||"", year:car.year||"", fuel:car.fuel||"", transmission:car.transmission||"", category:car.category||"", seats:car.seats||"", chassis_last5:car.chassis_last5||"", reg_type:car.reg_type||"", permit_no:car.permit_no||"", insurance_no:car.insurance_no||"", insurer:car.insurer||"", insurance_till:car.insurance_till||"", idv:car.idv||"", puc_till:car.puc_till||"", fastag:car.fastag||""} : (prev?.car_snapshot||null),
     created_at: prev?.created_at || new Date().toISOString(), updated_at:new Date().toISOString(),
@@ -1340,8 +1643,12 @@ async function copy(text, done){
 
 document.addEventListener("click", async e=>{
   const t=e.target.closest("button"); if(!t) return;
-  if(t.classList.contains("tab")){ const keepDraft = t.dataset.view==="new" && !S.editId; S.view=t.dataset.view; S.selected=null; S.carEdit=null; S.carView=null; S.confirmDelete=null; if(!keepDraft){ S.editId=null; S.draft=null; } render(); window.scrollTo(0,0); return; }
+  if(t.classList.contains("tab")){ const keepDraft = t.dataset.view==="new" && !S.editId; S.view=t.dataset.view; S.selected=null; S.carEdit=null; S.carView=null; S.custView=null; S.custEdit=null; S.confirmDelete=null; if(!keepDraft){ S.editId=null; S.draft=null; } render(); window.scrollTo(0,0); return; }
   if(t.dataset.pickcar){ pickCar(t.dataset.pickcar); return; }
+  if(t.dataset.pickcust){ const c=custById(t.dataset.pickcust); if(c) applyCustomer(c); return; }
+  if(t.dataset.webcust){ startNewCustomer(t.dataset.webcust, t.dataset.name, t.dataset.email); return; }
+  if(t.dataset.newcust){ startNewCustomer(t.dataset.newcust); return; }
+  if(t.dataset.custview){ if(t.dataset.keepdraft && !S.editId) S.draft=readForm(); S.view="customers"; S.custView=t.dataset.custview; S.custEdit=null; S.selected=null; S.confirmDoc=null; S.confirmCustDel=null; render(); window.scrollTo(0,0); return; }
   if(t.dataset.carview){ if(t.dataset.keepdraft && !S.editId) S.draft=readForm(); S.view="fleet"; S.carView=t.dataset.carview; S.carEdit=null; render(); window.scrollTo(0,0); return; }
   if(t.dataset.filter){ S.filter=t.dataset.filter; render(); return; }
   if(t.dataset.dtab){ S.detailTab=t.dataset.dtab; render(); return; }
@@ -1409,6 +1716,21 @@ document.addEventListener("click", async e=>{
       catch(err){ if(err && err.code==="declined") return; toast(err && err.code ? "Couldn't save the PDF here. Use Copy text instead." : "Couldn't build the PDF."); }
       break;
     }
+    case "cust-change": clearCustomer(); break;
+    case "cust-fields": { const f=$("#custfields"); f.hidden=!f.hidden; if(!f.hidden) $("#f_name").focus(); break; }
+    case "add-customer": S.custEdit="new"; S.newCustPhone=""; render(); window.scrollTo(0,0); break;
+    case "edit-cust": S.custEdit=S.custView; render(); window.scrollTo(0,0); break;
+    case "close-cust": S.custView=null; render(); break;
+    case "close-custform": S.custEdit=null; render(); break;
+    case "book-cust": { const c=custById(t.dataset.cust); if(!c) break; const d={customer_id:c.id, phone:c.phone}; KYC_FIELDS.forEach(k=>{ if(c[k]) d[k]=c[k]; }); S.editId=null; S.draft=d; S.view="new"; S.custView=null; render(); window.scrollTo(0,0); break; }
+    case "ask-del-cust": S.confirmCustDel=S.custView; render(); break;
+    case "keep-cust": S.confirmCustDel=null; render(); break;
+    case "del-cust": { const id=S.custView; if(await remove("customers/"+id)){ S.customers=S.customers.filter(x=>x.id!==id); S.custView=null; S.confirmCustDel=null; render(); toast("Customer deleted."); } break; }
+    case "drive-connect": { connectDrive().then(()=>{ render(); toast("Google Drive connected."); }).catch(err=>toast(err.message)); break; }
+    case "upload-doc": { const c=custById(S.custView); if(c) uploadDoc(c); break; }
+    case "ask-del-doc": S.confirmDoc=t.dataset.id; render(); break;
+    case "keep-doc": S.confirmDoc=null; render(); break;
+    case "del-doc": { const c=custById(S.custView); if(c) removeDoc(c, t.dataset.id); break; }
     case "add-car": S.carEdit="new"; S.confirmCar=false; render(); break;
     case "close-car": S.carEdit=null; render(); break;
     case "close-carview": S.carView=null; render(); break;
@@ -1419,7 +1741,16 @@ document.addEventListener("click", async e=>{
     case "del-car": { const id=S.carEdit; if(await remove("fleet/"+id)){ S.fleet=S.fleet.filter(x=>x.id!==id); S.carEdit=null; S.confirmCar=false; render(); toast("Car removed."); } break; }
   }
 });
-document.addEventListener("input", e=>{ if(e.target.closest("#bform")) updateSummary(); });
+document.addEventListener("input", e=>{
+  if(e.target.id==="f_phone") onPhoneInput();
+  if(e.target.id==="cust_q"){ S.custQuery=e.target.value; const l=$("#custlist"); if(l) l.innerHTML=custListHTML(); return; }
+  if(e.target.id==="doc_type") S.docType=e.target.value;
+  if(e.target.closest("#bform")) updateSummary();
+});
+document.addEventListener("focusin", e=>{ if(e.target.id==="f_phone") renderCustDropdown(); });
+document.addEventListener("focusout", e=>{ if(e.target.id==="f_phone") setTimeout(()=>{ const dd=$("#custdd"); if(dd && document.activeElement!==$("#f_phone")) dd.hidden=true; },150); });
+document.addEventListener("mousedown", e=>{ if(e.target.closest(".dd")) e.preventDefault(); });
+document.addEventListener("keydown", e=>{ if(e.target.id==="f_phone" && e.key==="Enter"){ e.preventDefault(); const first=$("#custdd .dd-row"); if(first) first.click(); } if(e.key==="Escape"){ const dd=$("#custdd"); if(dd) dd.hidden=true; } });
 document.addEventListener("change", e=>{
   if(e.target.id==="f_pickup"||e.target.id==="f_drop") refreshCarOptions();
   if(e.target.id==="f_car"){ const car=S.fleet.find(c=>c.id===e.target.value); if(car){ const r=$("#f_rate"), d=$("#f_deposit"); if(r && (!r.value || r.dataset.auto)){ r.value=car.rate||""; r.dataset.auto="1"; } if(d && (!d.value || d.dataset.auto)){ d.value=car.deposit??""; d.dataset.auto="1"; } } }
@@ -1429,6 +1760,7 @@ document.addEventListener("change", e=>{
 document.addEventListener("submit", async e=>{
   e.preventDefault();
   if(e.target.id==="bform"){ saveBooking(false); }
+  else if(e.target.id==="custform"){ saveCustomerForm(); }
   else if(e.target.id==="cform"){
     const v=id=>($("#"+id)?.value??"").trim();
     const make=v("c_make"), plate=v("c_plate").toUpperCase().replace(/\s+/g," "), rate=v("c_rate");
