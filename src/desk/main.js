@@ -266,7 +266,15 @@ function buildAgreement(b){
       "in any way that breaches the conditions of the Vehicle's insurance policy."
     ]},
     {t:"p", text:"6.3 Smoking, vaping and drinking alcohol inside the Vehicle are prohibited. Pets may be carried only with DriveKaro's prior written consent and in a carrier or on a seat cover."},
-    {t:"p", text:"6.4 Any breach of this clause 6 is a material breach of this Agreement."}
+    {t:"p", text:"6.4 Sale, mortgage or pledge prohibited. The Hirer shall not sell, mortgage, pledge, pawn, hypothecate, rent out or lend the Vehicle, or hand over the Vehicle, its keys or its Vehicle Documents to any person as security for money or for any other purpose, and shall not remove or change the Vehicle's number plates, Tracking Device or identification marks. If the Hirer does or attempts any of these:"},
+    {t:"ol", items:[
+      "this Agreement ends at once without notice, and the Hirer's right to possess the Vehicle ends;",
+      "DriveKaro may take back the Vehicle at any time, from any place and from any person holding it, by lawful means, including by using the Tracking Device and immobiliser;",
+      "DriveKaro may make a police complaint and file a first information report against the Hirer and every person involved, including for dishonest misappropriation (section 314), criminal breach of trust (section 316) and cheating (section 318) under the Bharatiya Nyaya Sanhita, 2023, and against any person who knowingly receives the Vehicle (section 317); the Hirer consents to DriveKaro giving this Agreement, the KYC records and the Tracking Device records to the police;",
+      "because the Hirer is not the owner, no person who buys the Vehicle, takes it on mortgage or accepts it as security gets any right in it (section 27 of the Sale of Goods Act, 1930), and DriveKaro owes that person nothing; and",
+      "the Hirer shall pay the Charges until the Vehicle is recovered, all recovery, towing, legal and police-related costs, and any damage to the Vehicle, and DriveKaro may apply the Security Deposit towards these amounts."
+    ]},
+    {t:"p", text:"6.5 Any breach of this clause 6 is a material breach of this Agreement."}
   ]});
   T.push({h:"7. Hirer's Obligations During the Rental", body:[
     {t:"p", text:"7.1 The Hirer shall, and shall ensure that every Authorised Driver shall:"},
@@ -286,7 +294,7 @@ function buildAgreement(b){
   T.push({h:"8. Tracking and In-Vehicle Devices", body:[
     {t:"p", text:"8.1 The Vehicle is fitted with a Tracking Device. The Hirer consents to DriveKaro recording the Vehicle's location, route, speed, distance and ignition status during the Booking Period for safety, theft prevention and recovery, billing, accident investigation, dispute resolution and legal compliance. This data is handled under clause 16."},
     {t:"p", text:"8.2 The Hirer shall not disconnect, obstruct, damage or remove any Tracking Device. Doing so is a material breach and the Hirer shall pay the charge stated in Schedule III and any further loss DriveKaro proves."},
-    {t:"p", text:`8.3 DriveKaro may use the immobiliser function only where: (a) the Vehicle has not been returned within ${s.non_return_hours} hours after the End Time without a confirmed extension and the Hirer cannot be reached; (b) DriveKaro reasonably believes the Vehicle has been stolen or is being driven by a person who is not an Authorised Driver; or (c) the Vehicle has been taken outside the Permitted Territory. DriveKaro shall first try to contact the Hirer where practicable, and shall use the function only in a way that stops the engine from restarting once switched off, never while the Vehicle is moving.`}
+    {t:"p", text:`8.3 DriveKaro may use the immobiliser function only where: (a) the Vehicle has not been returned within ${s.non_return_hours} hours after the End Time without a confirmed extension and the Hirer cannot be reached; (b) DriveKaro reasonably believes the Vehicle has been stolen or is being driven by a person who is not an Authorised Driver; (c) the Vehicle has been taken outside the Permitted Territory; or (d) DriveKaro reasonably believes the Vehicle has been sold, mortgaged or pledged in breach of clause 6.4. DriveKaro shall first try to contact the Hirer where practicable, and shall use the function only in a way that stops the engine from restarting once switched off, never while the Vehicle is moving.`}
   ]});
   T.push({h:"9. Accident, Theft, Breakdown and Other Incidents", body:[
     {t:"p", text:"9.1 If the Vehicle is involved in an accident, is damaged, stolen or seized, or breaks down, the Hirer shall:"},
@@ -516,7 +524,7 @@ function buildAgreement(b){
     {t:"p", text:"Completed at return: return date and time, odometer and distance driven, excess kilometres, fuel level, new damage, missing items, cleaning condition, known challans or tolls, deductions with reasons, final amount refunded or payable, photo and video reference, and the Hirer's acknowledgement or objection."}
   ]});
   T.push({h:"Schedule V: Declaration and Signatures", sig:true, body:[
-    {t:"p", text:`I, ${b.name||"________"}, the Hirer, confirm that I have read this Agreement and its Schedules in full; that the information and documents I have given are true; that I${hasAddl?" and the Additional Driver":""} meet the requirements of clause 3.1; that I have inspected the Vehicle and accept the Handover Record; that I consent to tracking under clause 8 and to the use of my data under clause 16; and that I sign voluntarily.`},
+    {t:"p", text:`I, ${b.name||"________"}, the Hirer, confirm that I have read this Agreement and its Schedules in full; that the information and documents I have given are true; that I${hasAddl?" and the Additional Driver":""} meet the requirements of clause 3.1; that I have inspected the Vehicle and accept the Handover Record; that I understand that selling, mortgaging or pledging the Vehicle is a criminal offence and allows DriveKaro to take it back at any time; that I consent to tracking under clause 8 and to the use of my data under clause 16; and that I sign voluntarily.`},
     {t:"p", text:"No signed Agreement, no handover."}
   ]});
   return {sections:T, car, calc:c, hasAddl};
