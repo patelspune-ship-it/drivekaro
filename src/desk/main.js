@@ -617,21 +617,8 @@ function validate(b, forReady){
   need("drop","Set the drop-off date and time.");
   if(b.pickup && b.drop && new Date(b.drop)<=new Date(b.pickup)) e.drop="Drop-off must be after pickup.";
   if(b.rate!=="" && b.rate!=null && !(Number(b.rate)>0)) e.rate="Enter the daily rate.";
-  if(forReady){
-    need("father","Needed for the agreement.");
-    need("dob","Needed to check the age rule.");
-    need("address","Needed for the agreement.");
-    need("aadhaar4","Enter the last 4 digits of the ID.");
-    need("dl","Enter the licence number.");
-    need("dl_till","Enter the licence expiry date.");
-    need("emergency","Add an emergency contact.");
-    need("rate","Enter the daily rate.");
-    { const t=depType(b);
-      if(t==="cash" && (b.deposit===""||b.deposit==null)) e.deposit="Enter the security deposit amount.";
-      if(t==="bike" && !String(b.dep_bike_no||"").trim()) e.dep_bike_no="Enter the bike number.";
-      if(t==="document" && !b.dep_doc_type) e.dep_doc_type="Choose the document kept as deposit."; }
-    if((b.addl_name||"").trim()){ need("addl_dl","Enter the additional driver's licence number."); need("addl_dl_till","Enter the licence expiry date."); need("addl_dob","Needed to check the age rule."); }
-  }
+  // Only the essentials block the agreement; KYC and deposit details can be completed at pickup (see softMissing).
+  if(forReady){ need("rate","Enter the daily rate."); }
   const car=S.fleet.find(c=>c.id===b.car_id); const min=/suv|luxury/i.test(car?.category||"")? s.min_age_premium : s.min_age;
   if(b.dob && b.pickup){ const a=ageOn(b.dob,b.pickup); if(a!==null && a<min) e.dob=`Customer is ${a}. This car needs age ${min}+.`; }
   if(b.addl_dob && b.pickup){ const a=ageOn(b.addl_dob,b.pickup); if(a!==null && a<min) e.addl_dob=`Driver is ${a}. This car needs age ${min}+.`; }
@@ -646,9 +633,25 @@ function validate(b, forReady){
     const ins=docStatus(car.insurance_till,b.drop), puc=docStatus(car.puc_till,b.drop);
     if(ins.bad) e.car_id=`Insurance for ${car.plate} ${ins.label.toLowerCase()}. Renew it in the fleet profile first.`;
     else if(puc.bad) e.car_id=`PUC for ${car.plate} ${puc.label.toLowerCase()}. Renew it in the fleet profile first.`;
-    else if(!car.insurance_no || ins.missing) e.car_id=`Add ${car.plate}'s insurance details in its fleet profile.`;
   }
   return e;
+}
+// Details that print as blanks if missing but don't stop the agreement from being sent.
+function softMissing(b){
+  const out=[]; const miss=(k,l)=>{ if(!String(b[k]??"").trim()) out.push(l); };
+  miss("father","father's/spouse's name"); miss("dob","date of birth"); miss("address","address"); miss("emergency","emergency contact");
+  miss("dl","licence number"); miss("dl_till","licence expiry"); miss("aadhaar4","ID last 4 digits");
+  const t=depType(b);
+  if(t==="cash" && (b.deposit===""||b.deposit==null)) out.push("deposit amount");
+  if(t==="bike" && !String(b.dep_bike_no||"").trim()) out.push("deposit bike number");
+  if(t==="document" && !b.dep_doc_type) out.push("deposit document");
+  if((b.addl_name||"").trim()){ miss("addl_dl","additional driver's licence"); miss("addl_dob","additional driver's date of birth"); }
+  const car=S.fleet.find(c=>c.id===b.car_id); if(car && !car.insurance_no) out.push(`${car.plate} insurance number`);
+  return out;
+}
+function softNote(b){
+  const m=softMissing(b); if(!m.length) return "";
+  return `<p class="note" style="margin:0 0 10px">Not filled yet (optional, prints as blank): ${esc(m.join(", "))}. Add them before sending if you have them — they can't be added to an agreement after it's signed.</p>`;
 }
 
 /* ---------- views ---------- */
@@ -933,7 +936,7 @@ function viewDetail(){
     <div class="paper-wrap">
       ${S.detailTab==="payments" ? viewPayments(b) : `
       <div class="paper-bar">
-        <div><div class="label">Agreement preview · v2.0</div>${missing.length?`<div class="warnline">${missing.length} thing${missing.length>1?"s":""} to fix before signing (see Next step)</div>`:`<div class="muted" style="font-size:13px">All details filled</div>`}</div>
+        <div><div class="label">Agreement preview · v2.0</div>${missing.length?`<div class="warnline">${missing.length} thing${missing.length>1?"s":""} to fix before signing (see Next step)</div>`:softMissing(b).length?`<div class="muted" style="font-size:13px">${softMissing(b).length} optional detail${softMissing(b).length>1?"s":""} blank</div>`:`<div class="muted" style="font-size:13px">All details filled</div>`}</div>
         <div class="actions">${canDownload?`<button class="btn sm" data-act="pdf">Save PDF</button>`:""}<button class="btn sm" data-act="copy-agreement">Copy text</button></div>
       </div>
       <article class="paper">${agreementHTML(b)}</article>`}
@@ -981,8 +984,10 @@ function signedFilesHTML(b){
 }
 
 function nextStep(b, missing){
-  if(b.status==="draft") return `<p style="margin:0 0 10px;font-size:14px">Fill the missing details to make the agreement ready for signing.</p><button class="btn primary" data-act="edit">Complete details</button>`;
-  if(b.status==="ready") return `${esignNotice(b)}<p style="margin:0 0 10px;font-size:14px">Send the agreement to ${esc(b.name)} for Aadhaar OTP signing through Leegality.</p>
+  if(b.status==="draft") return missing.length
+    ? `<p style="margin:0 0 10px;font-size:14px">Fill the missing details to make the agreement ready for signing.</p><button class="btn primary" data-act="edit">Complete details</button>`
+    : `${softNote(b)}<p style="margin:0 0 10px;font-size:14px">The essentials are filled. You can send this agreement now.</p><div class="actions"><button class="btn primary" data-act="status" data-to="ready">Make agreement ready</button><button class="btn" data-act="edit">Add more details</button></div>`;
+  if(b.status==="ready") return `${esignNotice(b)}${softNote(b)}<p style="margin:0 0 10px;font-size:14px">Send the agreement to ${esc(b.name)} for Aadhaar OTP signing through Leegality.</p>
     <div class="actions"><button class="btn primary" data-act="esign-send" ${S.esignBusy?"disabled":""}>${S.esignBusy?"Sending…":"Send for Aadhaar eSign"}</button>${S.downloads&&window.jspdf?`<button class="btn" data-act="pdf">Save agreement PDF</button>`:""}</div>
     <details class="more"><summary>Signed outside the desk? Record it manually</summary>
       ${fieldHTML("es_doc","Leegality document ID (optional)",b.esign_doc_id||"")}
@@ -1183,7 +1188,7 @@ function viewForm(errs={}){
         <button type="submit" class="btn primary" id="f_submit">Save and prepare agreement</button>
         <button type="button" class="btn" data-act="save-draft">Save as draft</button>
       </div>
-      <p class="note" style="margin:12px 0 0">A booking with every detail filled becomes <b>Agreement ready</b>. Missing details keep it as a draft.</p>
+      <p class="note" style="margin:12px 0 0">Customer name, mobile, car, dates and rate are enough for <b>Agreement ready</b>. KYC and deposit details can be added later.</p>
     </aside>
   </form>`;
 }
