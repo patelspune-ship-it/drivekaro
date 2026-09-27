@@ -25,9 +25,7 @@ const CHARGE_FIELDS = [
   ["smoking_charge","Smoke odour or pet hair (₹)","money",""],
   ["night_charge","Night handling, 1–6 AM (₹)","money",""],
   ["delivery_charge","Delivery or collection (₹)","money","0 = not charged"],
-  ["deductible","Deductible per incident (₹)","money","What the customer pays per accident"],
-  ["loss_of_use_per_day","Loss of use (₹ per day)","money","0 = not charged"],
-  ["loss_of_use_max_days","Loss of use, max days","num",""],
+  ["damage_limit","Accident damage paid by customer, up to (₹)","money","Above this: insurance claim, customer pays what insurance doesn't"],
   ["lost_key","Lost key (₹)","money",""],
   ["lost_doc","Lost vehicle document (₹)","money",""],
   ["gps_tamper","Tracker tampering (₹)","money",""],
@@ -42,7 +40,7 @@ const CHARGE_FIELDS = [
 const DEFAULT_CHARGES = {
   km_per_day:350, extra_km:5, grace_minutes:60, late_per_hour:500, refuel_fee:500,
   cleaning_charge:250, smoking_charge:2000, night_charge:200, delivery_charge:0,
-  deductible:10000, loss_of_use_per_day:0, loss_of_use_max_days:7,
+  damage_limit:25000,
   lost_key:3000, lost_doc:500, gps_tamper:10000, challan_fee:100,
   challan_holdback:2000, challan_days:30, deposit_refund_days:3,
   part_block_rule:"Charged as a full day",
@@ -198,7 +196,7 @@ function buildAgreement(b){
       '"Authorised Driver" means the Hirer and any Additional Driver.',
       '"Booking Period" means the period from the Start Time to the End Time stated in Schedule III, as extended under clause 2.5.',
       '"Charges" means the rental amount stated in Schedule III (the "Rental Charges") and every other amount payable by the Hirer under this Agreement or Schedule III.',
-      '"Deductible" means the amount per incident stated in Schedule III that the Hirer pays towards damage to or loss of the Vehicle in an incident that is not an Excluded Event.',
+      '"Damage Limit" means the amount per incident stated in Schedule III up to which the Hirer pays the repair cost of the Vehicle directly, without an insurance claim.',
       '"Excluded Event" has the meaning given in clause 10.4.',
       '"Handover Record" means Part B of Schedule II together with the time-stamped photographs and video of the Vehicle taken at handover.',
       '"Insured Declared Value" or "IDV" means the insured declared value of the Vehicle stated in its insurance policy on the date of the relevant event.',
@@ -303,17 +301,17 @@ function buildAgreement(b){
       "follow DriveKaro's instructions on towing and repair."
     ]},
     {t:"p", text:"9.2 If the Vehicle breaks down through normal wear or a mechanical defect not caused by the Hirer, DriveKaro shall arrange roadside assistance and repair or, where reasonably available, a replacement vehicle of similar category. If neither is possible, DriveKaro shall refund the Rental Charges for the unused part of the Booking Period. The Hirer is not charged for such a breakdown."},
-    {t:"p", text:"9.3 Towing, repair and loss-of-use costs of a breakdown caused by the Hirer's misuse, including wrong fuel, running out of fuel, ignoring warning lights or driving through water, are payable by the Hirer."}
+    {t:"p", text:"9.3 Towing and repair costs, and rent at the daily rental rate for the days the Vehicle is off the road, for a breakdown caused by the Hirer's misuse, including wrong fuel, running out of fuel, ignoring warning lights or driving through water, are payable by the Hirer."}
   ]});
   T.push({h:"10. Insurance and Liability for Damage or Loss", body:[
     {t:"p", text:"10.1 DriveKaro shall keep the Vehicle covered throughout the Booking Period by a comprehensive motor insurance policy covering own damage, theft and third-party liability as required by the Motor Vehicles Act, 1988. The policy number and validity are stated in Schedule II. The Hirer shall do nothing that gives the insurer grounds to refuse a claim, and shall give true and complete information to the police, the insurer and its surveyor."},
     {t:"p", text:"10.2 Claims by third parties for death, bodily injury or property damage arising from the use of the Vehicle shall be handled under that policy. The Hirer shall cooperate fully in the defence of any such claim."},
-    {t:"p", text:"10.3 For damage to or loss of the Vehicle in an incident that is not an Excluded Event, the Hirer's liability is limited to:"},
+    {t:"p", text:`10.3 For damage to the Vehicle in an incident that is not an Excluded Event, the Hirer shall pay:`},
     {t:"ol", items:[
-      "the Deductible for each incident;",
-      "damage the policy does not cover, being damage to tyres and wheels not caused in an insured accident, interior damage from spills, burns or stains, and loss of or damage to keys, Vehicle Documents and accessories;",
-      "the loss-of-use charge stated in Schedule III for each day the Vehicle is off the road for repair, up to the maximum number of days stated there; and",
-      "where DriveKaro, acting reasonably, does not make an insurance claim because the repair cost is less than the Deductible, the actual repair cost up to the Deductible."
+      `if the total repair cost is up to the Damage Limit (${money(b,"damage_limit")}), the actual repair cost, and DriveKaro shall not make an insurance claim for it;`,
+      "if the total repair cost is more than the Damage Limit, the part of the repair cost that the insurer does not pay after DriveKaro claims under the insurance policy, including the compulsory and voluntary excess, depreciation deducted on replaced parts, and any item the insurer disallows;",
+      "in every case, the cost of damage the policy does not cover, such as damage to tyres and wheels not caused in an insured accident, interior damage from spills, burns or stains, and loss of or damage to keys, Vehicle Documents and accessories; and",
+      `rent at the daily rental rate in Schedule III (${inr(b.rate)} per day) for each day the Vehicle is at the workshop or otherwise off the road because of the damage, from the day of the incident until the repaired Vehicle is released, as shown by the workshop's job card or invoice.`
     ]},
     {t:"p", text:"10.4 Each of the following is an \"Excluded Event\":"},
     {t:"ol", items:[
@@ -327,7 +325,7 @@ function buildAgreement(b){
       "the insurer rejected or reduced the claim because of an act, omission or false statement of an Authorised Driver."
     ]},
     {t:"p", text:"10.5 In an Excluded Event, clause 10.3 does not apply and the Hirer is liable for the full cost of repair, towing, assessment and loss of use, and for any third-party liability that the insurer recovers from DriveKaro or refuses to pay. If the Vehicle is stolen or declared a total loss in an Excluded Event, the Hirer shall also pay the difference between the Vehicle's IDV and any amount DriveKaro actually receives from the insurer."},
-    {t:"p", text:"10.6 If the Vehicle is stolen or declared a total loss in an incident that is not an Excluded Event, the Hirer shall pay only the Deductible and any Charges due up to the date of the incident, provided the Hirer has complied with clause 9.1."},
+    {t:"p", text:"10.6 If the Vehicle is stolen or declared a total loss in an incident that is not an Excluded Event, the Hirer shall pay the amount the insurer deducts from the claim (such as the compulsory excess) and any Charges due up to the date of the incident, provided the Hirer has complied with clause 9.1."},
     {t:"p", text:"10.7 Repairs shall be carried out at an authorised or reputable workshop. DriveKaro shall give the Hirer a copy of the estimate or invoice and the photographs relied on. The Hirer may, at the Hirer's cost, have the damage inspected by an independent surveyor within 3 days of being notified."},
     {t:"p", text:"10.8 The Vehicle's insurance may not cover personal accident for the Hirer or passengers, or personal belongings. DriveKaro is not liable for loss of belongings left in the Vehicle, except where caused by DriveKaro's own negligence."}
   ]});
@@ -335,7 +333,7 @@ function buildAgreement(b){
     {t:"p", text:"11.1 The Hirer is responsible for all traffic challans, fines, penalties, compounding fees, tolls, parking charges and inter-state taxes or permit fees relating to the Vehicle during the Booking Period, including those notified after the Vehicle is returned."},
     {t:"p", text:"11.2 DriveKaro shall send the Hirer a copy of each challan it receives. The Hirer shall pay it within 7 days and send proof, failing which DriveKaro may pay it and recover the amount under clause 4.5, including from any Challan Holdback. The Hirer consents to DriveKaro giving the Authorised Driver's name, address and licence details to any authority entitled to them, including under section 133 of the Motor Vehicles Act, 1988, and shall attend any court or authority where required."},
     {t:"p", text:"11.3 Tolls paid through the FASTag fitted to the Vehicle are recoverable from the Hirer at the amount deducted."},
-    {t:"p", text:"11.4 If the Vehicle is detained, seized or impounded by any authority during the Booking Period because of an act or omission of an Authorised Driver, the Hirer shall inform DriveKaro within 1 hour, take all steps to secure its release, and pay all fines, release charges, towing and storage costs and the loss-of-use charge in Schedule III for each day until release. If the seizure is caused by a defect in the Vehicle Documents or any failure of DriveKaro, DriveKaro shall bear those costs and refund the Rental Charges for the lost period."}
+    {t:"p", text:"11.4 If the Vehicle is detained, seized or impounded by any authority during the Booking Period because of an act or omission of an Authorised Driver, the Hirer shall inform DriveKaro within 1 hour, take all steps to secure its release, and pay all fines, release charges, towing and storage costs and rent at the daily rental rate in Schedule III for each day until release. If the seizure is caused by a defect in the Vehicle Documents or any failure of DriveKaro, DriveKaro shall bear those costs and refund the Rental Charges for the lost period."}
   ]});
   T.push({h:"12. Return of the Vehicle", body:[
     {t:"p", text:"12.1 The Hirer shall return the Vehicle at the Designated Location by the End Time, with all keys, Vehicle Documents, accessories and Tracking Devices, with the same fuel or charge level as in the Handover Record, and in the same condition apart from fair wear and tear."},
@@ -501,8 +499,8 @@ function buildAgreement(b){
       ["Extra cleaning", `${money(b,"cleaning_charge")}; smoke odour or pet hair ${money(b,"smoking_charge")}`],
       ["Night handling (1:00 AM to 6:00 AM)", money(b,"night_charge")],
       ["Delivery or collection away from Designated Location", money(b,"delivery_charge")],
-      ["Deductible per incident", money(b,"deductible")],
-      ["Loss-of-use charge", Number(ch(b,"loss_of_use_per_day"))>0 ? `${money(b,"loss_of_use_per_day")} per day, up to ${ch(b,"loss_of_use_max_days")} days` : "Not charged"],
+      ["Damage Limit (accident damage paid directly by Hirer)", `${money(b,"damage_limit")} per incident; above this, insurance claim and the Hirer pays the amount not paid by the insurer`],
+      ["Rent while the Vehicle is at the workshop or seized", V(b.rate && `${inr(b.rate)} per day (the daily rental rate)`)],
       ["Lost key", money(b,"lost_key")],
       ["Lost Vehicle Document", money(b,"lost_doc")],
       ["Tracking Device tampering", money(b,"gps_tamper")],
@@ -692,7 +690,7 @@ function rowHTML(b){
 
 /* ---------- payments, invoice, WhatsApp ---------- */
 const PAY_KINDS = {payment:"Payment received", deposit_in:"Deposit received", deposit_used:"Adjusted from deposit", deposit_refund:"Deposit refunded"};
-const EXTRA_LABELS = ["Extra kilometres","Late return","Fuel shortfall","Extra cleaning","Night handling","Traffic challan / toll","Damage (deductible)","Lost key or document","Other"];
+const EXTRA_LABELS = ["Extra kilometres","Late return","Fuel shortfall","Extra cleaning","Night handling","Traffic challan / toll","Accident damage","Insurance shortfall","Garage days rent","Lost key or document","Other"];
 const sum = (arr,f)=>arr.reduce((s,x)=>s+(Number(f(x))||0),0);
 function toLocalInput(d){ d=d||new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function ledger(b){
