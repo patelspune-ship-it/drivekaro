@@ -225,7 +225,7 @@ function buildAgreement(b){
     ]},
     {t:"p", text:"3.2 Before handover, each Authorised Driver shall produce the original driving licence and a government photo identity document, allow a photograph to be taken, and provide any further document DriveKaro reasonably requests. DriveKaro may verify the licence through the Parivahan or Sarathi portals."},
     {t:"p", text:"3.3 DriveKaro does not collect or store any person's full Aadhaar number. Where an Aadhaar card is used for identity, only a masked copy showing the last four digits is kept. The Hirer's Aadhaar number is entered by the Hirer only on the licensed eSign service provider's page when signing."},
-    {t:"p", text:"3.4 Only an Authorised Driver may drive the Vehicle. The Hirer and each Additional Driver are jointly and severally liable under this Agreement, and any act or omission of an Additional Driver is treated as the act or omission of the Hirer."},
+    {t:"p", text:"3.4 Only an Authorised Driver may drive the Vehicle. An Additional Driver does not sign this Agreement; the Hirer is fully responsible for every Additional Driver as if the Hirer were driving, any act or omission of an Additional Driver is treated as the act or omission of the Hirer, and the Hirer confirms that each Additional Driver has been told of and agrees to follow the rules in this Agreement."},
     {t:"p", text:"3.5 DriveKaro may refuse or stop handover if verification cannot be completed, a document appears altered or does not match the person, or an Authorised Driver appears unfit to drive. DriveKaro will then refund all Charges and the Security Deposit paid, except where the refusal is due to a forged document or false information."}
   ]});
   T.push({h:"4. Charges, Security Deposit and Payment", body:[
@@ -524,7 +524,7 @@ function buildAgreement(b){
     {t:"p", text:"Completed at return: return date and time, odometer and distance driven, excess kilometres, fuel level, new damage, missing items, cleaning condition, known challans or tolls, deductions with reasons, final amount refunded or payable, photo and video reference, and the Hirer's acknowledgement or objection."}
   ]});
   T.push({h:"Schedule V: Declaration and Signatures", sig:true, body:[
-    {t:"p", text:`I, ${b.name||"________"}, the Hirer, confirm that I have read this Agreement and its Schedules in full; that the information and documents I have given are true; that I${hasAddl?" and the Additional Driver":""} meet the requirements of clause 3.1; that I have inspected the Vehicle and accept the Handover Record; that I understand that selling, mortgaging or pledging the Vehicle is a criminal offence and allows DriveKaro to take it back at any time; that I consent to tracking under clause 8 and to the use of my data under clause 16; and that I sign voluntarily.`},
+    {t:"p", text:`I, ${b.name||"________"}, the Hirer, confirm that I have read this Agreement and its Schedules in full; that the information and documents I have given are true; that I${hasAddl?" and the Additional Driver":""} meet the requirements of clause 3.1;${hasAddl?" that I take full responsibility for the Additional Driver under clause 3.4;":""} that I have inspected the Vehicle and accept the Handover Record; that I understand that selling, mortgaging or pledging the Vehicle is a criminal offence and allows DriveKaro to take it back at any time; that I consent to tracking under clause 8 and to the use of my data under clause 16; and that I sign voluntarily.`},
     {t:"p", text:"No signed Agreement, no handover."}
   ]});
   return {sections:T, car, calc:c, hasAddl};
@@ -533,7 +533,6 @@ function buildAgreement(b){
 function sigParties(b, A){
   const s=S.settings;
   const out=[["HIRER", `Aadhaar eSign by ${b.name||"________"}`]];
-  if(A.hasAddl) out.push(["ADDITIONAL DRIVER", `Aadhaar eSign by ${b.addl_name}`]);
   out.push([`FOR ${s.legal_name.toUpperCase()}`, `Aadhaar eSign by ${s.signatory||"________"}, Proprietor`]);
   return out;
 }
