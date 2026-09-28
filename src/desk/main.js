@@ -909,6 +909,7 @@ function viewPayments(b){
       ${fieldHTML("r_odo","Odometer at return (km)",b.odo_return??"",{type:"number",hint:b.odo?`At pickup: ${Number(b.odo).toLocaleString("en-IN")} km`:"Add pickup odometer in booking details for km maths"})}
       ${fieldHTML("r_at","Returned at",b.return_at||"",{type:"datetime-local",hint:`Due ${fmtDT(b.drop)}`})}
       ${selectHTML("r_fuel","Fuel at return",b.fuel_return||"",[["",""],...FUEL.map(f=>[f,f])],{hint:b.fuel?`At pickup: ${b.fuel}`:""})}
+      ${tripFieldsHTML("r_", b)}
     </div>
     <div class="actions" style="margin-top:10px"><button type="button" class="btn" data-act="save-return">Save return details</button></div>
     ${sg.length?`<div class="suggest">${sg.map(x=>`<div><b>${esc(x.label)}:</b> ${esc(x.info)} → <b>${inr(x.amount)}</b> <button type="button" class="btn sm" data-act="suggest-add" data-label="${esc(x.label)}" data-amount="${x.amount}" data-note="${esc(x.note)}">Add charge</button></div>`).join("")}</div>`:""}
@@ -1155,7 +1156,7 @@ function pickCar(id){
 const FORM_MAP={name:"f_name",father:"f_father",dob:"f_dob",phone:"f_phone",alt_phone:"f_alt",email:"f_email",address:"f_address",emergency:"f_emergency",
   dl:"f_dl",dl_till:"f_dl_till",rto:"f_rto",id_type:"f_idtype",aadhaar4:"f_aadhaar4",
   addl_name:"f_addl_name",addl_dob:"f_addl_dob",addl_phone:"f_addl_phone",addl_dl:"f_addl_dl",addl_dl_till:"f_addl_dl_till",
-  customer_id:"f_custid",car_id:"f_car",pickup:"f_pickup",drop:"f_drop",location:"f_location",rate:"f_rate",deposit_type:"f_deptype",deposit:"f_deposit",dep_bike_no:"f_depbike",dep_bike_model:"f_depbikemodel",dep_doc_type:"f_depdoc",dep_doc_details:"f_depdocdet",paymode:"f_paymode",payref:"f_payref",
+  customer_id:"f_custid",car_id:"f_car",pickup:"f_pickup",drop:"f_drop",location:"f_location",trip_to:"f_tripto",trip_type:"f_triptype",rate:"f_rate",deposit_type:"f_deptype",deposit:"f_deposit",dep_bike_no:"f_depbike",dep_bike_model:"f_depbikemodel",dep_doc_type:"f_depdoc",dep_doc_details:"f_depdocdet",paymode:"f_paymode",payref:"f_payref",
   adv_yes:"f_advyes",adv_amt:"f_advamt",adv_mode:"f_advmode",adv_ref:"f_advref",
   odo:"f_odo",fuel:"f_fuel",keys:"f_keys",ext_damage:"f_ext",int_damage:"f_int",notes:"f_notes"};
 
@@ -1183,6 +1184,7 @@ function viewForm(errs={}){
         ${fieldHTML("f_drop","Drop-off",g("drop"),{type:"datetime-local",req:1,err:errs.drop})}
         <div class="field wide"><div id="durline" class="durline"></div></div>
         ${fieldHTML("f_location","Handover and return location",g("location")||S.settings.designated_location,{wide:1})}
+        ${tripFieldsHTML("f_", b)}
         ${selectHTML("f_delivery","Delivery or collection",b.with_delivery?"yes":"no",[["no","No, customer comes to us"],["yes","Yes, add delivery charge"]])}
       </div></fieldset>
       <fieldset><legend>3 · Price and charges ${sub("(for this booking only)")}</legend>
@@ -1829,7 +1831,7 @@ function quickTotals(q){
 }
 function readQuick(){
   const v=id=>($("#"+id)?.value??"").trim();
-  return {phone:v("q_phone"), name:v("q_name"), car_id:v("f_car"), pickup:v("f_pickup"), drop:v("f_drop"), rate:v("f_rate"), deposit:v("f_deposit"), adv:v("q_adv"), adv_amt:v("q_advamt"), adv_mode:v("q_advmode"), adv_ref:v("q_advref")};
+  return {phone:v("q_phone"), name:v("q_name"), car_id:v("f_car"), pickup:v("f_pickup"), drop:v("f_drop"), rate:v("f_rate"), deposit:v("f_deposit"), adv:v("q_adv"), adv_amt:v("q_advamt"), adv_mode:v("q_advmode"), adv_ref:v("q_advref"), trip_to:v("q_tripto"), trip_type:v("q_triptype")||"SELF"};
 }
 function viewQuick(errs={}){
   const q=S.quick||{adv:"yes", adv_mode:"UPI"}; const g=k=>q[k]??"";
@@ -1845,6 +1847,7 @@ function viewQuick(errs={}){
     <fieldset><legend>Car and dates</legend><div class="grid">
       ${fieldHTML("f_pickup","Pickup date and time",g("pickup"),{type:"datetime-local",req:1,err:errs.dates})}
       ${fieldHTML("f_drop","Drop-off date and time",g("drop"),{type:"datetime-local",req:1})}
+      ${tripFieldsHTML("q_", q)}
     </div>
     <input type="hidden" id="f_car" value="${esc(g("car_id"))}">
     <div id="carpick" style="margin-top:12px">${pickGridHTML(g("car_id"), g("pickup"), g("drop"))}</div>
@@ -1897,12 +1900,73 @@ async function saveQuick(){
   const car=S.fleet.find(c=>c.id===q.car_id); const id=newId(); const now=new Date().toISOString();
   const kyc={}; if(existing) for(const k of KYC_FIELDS) if(existing[k]) kyc[k]=existing[k];
   const doc={...kyc, id, status:"confirmed", name:q.name||existing?.name||"", phone:fmtPhone(q.phone), customer_id:cust?.id||"",
-    car_id:q.car_id, car_snapshot:carSnapshot(car), pickup:q.pickup, drop:q.drop, rate:Number(q.rate), deposit:Number(q.deposit)||0, deposit_type:"cash",
+    car_id:q.car_id, car_snapshot:carSnapshot(car), trip_to:q.trip_to, trip_type:q.trip_type, pickup:q.pickup, drop:q.drop, rate:Number(q.rate), deposit:Number(q.deposit)||0, deposit_type:"cash",
     charges:defaultCharges(), payments: q.adv==="yes" ? [{id:"p"+Date.now().toString(36), kind:"payment", advance:true, amount:Number(q.adv_amt), mode:q.adv_mode||"UPI", ref:q.adv_ref, at:toLocalInput()}] : [],
     created_at:now, updated_at:now, confirmed_at:now, agreement_date:toLocalInput().slice(0,10), template_version:"2.0", quick:true};
   if(!(await write("bookings/"+id, doc))) return;
   localUpsert(S.bookings, doc); S.quick=null; S.view="bookings"; S.selected=id; S.detailTab="overview"; render(); window.scrollTo(0,0);
   toast("Booking confirmed. Send the confirmation on WhatsApp.");
+}
+
+/* ---------- trips sheet (DriveKaro's own monthly format, one tab per car) ---------- */
+const TRIP_TO_PRESETS=["LOCAL","Konkan","MAHABLESHWAR / LONAVALA","Goa","Mumbai","Nashik","Kolhapur","Alibaug","Shirdi"];
+const TRIP_TYPES=["SELF","WITH DRIVER"];
+function tripToList(){ const seen=new Set(TRIP_TO_PRESETS.map(x=>x.toUpperCase())); const out=[...TRIP_TO_PRESETS]; for(const b of S.bookings){ const t=String(b.trip_to||"").trim(); if(t && !seen.has(t.toUpperCase())){ seen.add(t.toUpperCase()); out.push(t); } } return out; }
+function tripToDatalist(){ return `<datalist id="tripto_list">${tripToList().map(t=>`<option value="${esc(t)}">`).join("")}</datalist>`; }
+function tripFieldsHTML(prefix, b){
+  return `<div class="field"><label for="${prefix}tripto">Trip to</label><input id="${prefix}tripto" list="tripto_list" value="${esc(b.trip_to||"")}" placeholder="LOCAL, Konkan, Goa…" autocomplete="off"><span class="hint">For your trips report</span></div>
+    ${selectHTML(prefix+"triptype","Trip type",b.trip_type||"SELF",TRIP_TYPES.map(t=>[t,t]))}${tripToDatalist()}`;
+}
+function tripDaysLabel(b){
+  const p=new Date(b.pickup), e=new Date(b.status==="returned"&&b.return_at?b.return_at:b.drop);
+  if(!isNaN(p)&&!isNaN(e)&&p.toDateString()===e.toDateString()) return "SAME DAY";
+  return calc(b).days;
+}
+async function exportTripsXlsx(){
+  const {default: writeExcelFile} = await import("write-excel-file/browser");
+  const R=revModel();
+  const inRange = R.range==="month" ? b=>ym(b.pickup)===R.month : R.range==="fy" ? R.inFY : ()=>true;
+  const trips=S.bookings.filter(b=>EARNED.includes(b.status) && inRange(b) && (!S.repCar||S.repCar==="all"||b.car_id===S.repCar)).sort((a,b)=>new Date(a.pickup)-new Date(b.pickup));
+  const carIds=[...new Set([...(S.repCar&&S.repCar!=="all"?[S.repCar]:S.fleet.map(c=>c.id)), ...trips.map(b=>b.car_id)])];
+  const carInfo=id=>S.fleet.find(c=>c.id===id) || S.bookings.find(b=>b.car_id===id)?.car_snapshot || {plate:"Car", make_model:""};
+  const H=v=>({value:v, fontWeight:"bold", backgroundColor:"#F3DCD4"});
+  const D=s=>{ const d=new Date(s); return isNaN(d)?null:{value:new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())), type:Date, format:"dd/mm/yyyy"}; };
+  const N=(v,bold)=>({value:Math.round(Number(v)||0), type:Number, format:"#,##0", ...(bold?{fontWeight:"bold"}:{})});
+  const test=expTest(R);
+  const title=`DriveKaro Trips ( ${R.rangeLabel} )`;
+  const used=new Set();
+  const sheetName=(c)=>{ let n=String(c.plate||c.make_model||"Car").replace(/[\\/?*[\]:]/g," ").trim().slice(0,31)||"Car"; let k=n, i=2; while(used.has(k.toLowerCase())){ k=`${n.slice(0,28)} ${i++}`; } used.add(k.toLowerCase()); return k; };
+  const summary=[[{value:title, fontWeight:"bold"}],[],[H("Car"),H("Plate"),H("Trips"),H("Trip days"),H("AMOUNT EARNED"),H("Received"),H("Balance due"),H("Expenses"),H("Profit")]];
+  const carSheets=[]; const T={n:0,days:0,amt:0,rec:0,bal:0,exp:0};
+  for(const id of carIds){
+    const c=carInfo(id); const list=trips.filter(b=>b.car_id===id);
+    if(!list.length && S.repCar==="all" && !S.fleet.some(x=>x.id===id && x.active!==false)) continue;
+    const rows=[[{value:`${title} · ${c.make_model||""} ${c.plate||""}`.trim(), fontWeight:"bold"}],[],
+      [H("DATE OF TRIP"),H("Customer Name"),H("Trip To"),H("AMOUNT EARNED"),H("Trip Type"),H("TRIP DAYS"),H("Return date"),H("Mobile"),H("Received"),H("Balance"),H("Booking ID")]];
+    let amt=0, days=0, rec=0, bal=0;
+    for(const b of list){
+      const L=ledger(b); const dl=tripDaysLabel(b);
+      amt+=L.total; days+=L.c.days; rec+=L.settled; bal+=Math.max(0,L.balance);
+      rows.push([D(b.pickup), {value:b.name||""}, {value:b.trip_to||null}, N(L.total), {value:b.trip_type||"SELF"}, typeof dl==="number"?N(dl):{value:dl}, D(b.status==="returned"&&b.return_at?b.return_at:b.drop), {value:b.phone||""}, N(L.settled), N(Math.max(0,L.balance)), {value:b.id}]);
+    }
+    if(!list.length) rows.push([{value:"No trips in this period"}]);
+    rows.push([]);
+    rows.push([{value:"TOTAL", fontWeight:"bold"}, {value:`${list.length} trip${list.length===1?"":"s"}`}, null, N(amt,true), null, N(days,true), null, null, N(rec,true), N(bal,true), null]);
+    const x=expTotal(expFor(id),test);
+    rows.push([{value:"Expenses"}, null, null, N(x)]);
+    rows.push([{value:"PROFIT", fontWeight:"bold"}, null, null, N(amt-x,true)]);
+    carSheets.push({data:rows, sheet:sheetName(c), columns:[{width:14},{width:24},{width:26},{width:16},{width:12},{width:11},{width:13},{width:14},{width:12},{width:12},{width:18}]});
+    summary.push([{value:c.make_model||""},{value:c.plate||""},N(list.length),N(days),N(amt),N(rec),N(bal),N(x),N(amt-x)]);
+    T.n+=list.length; T.days+=days; T.amt+=amt; T.rec+=rec; T.bal+=bal; T.exp+=x;
+  }
+  const gen=(!S.repCar||S.repCar==="all") ? expTotal((S.expenses||[]).filter(e=>!e.car_id),test) : 0;
+  if(gen){ summary.push([{value:"Business (not one car)"},null,null,null,null,null,null,N(gen),N(-gen)]); T.exp+=gen; }
+  summary.push([]);
+  summary.push([{value:"TOTAL", fontWeight:"bold"},null,N(T.n,true),N(T.days,true),N(T.amt,true),N(T.rec,true),N(T.bal,true),N(T.exp,true),N(T.amt-T.exp,true)]);
+  const sheets=[{data:summary, sheet:"Summary", columns:[{width:24},{width:15},{width:8},{width:10},{width:16},{width:13},{width:13},{width:12},{width:13}]}, ...carSheets];
+  const blob=await writeExcelFile(sheets).toBlob();
+  const who = R.car ? (R.car.plate||"car").replace(/\s+/g,"") : "All-cars";
+  return {filename:`DriveKaro-Trips-${who}-${R.rangeLabel.replace(/\s+/g,"-")}.xlsx`, blob:new Blob([blob],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})};
 }
 
 /* ---------- UPI payments ---------- */
@@ -2345,14 +2409,14 @@ function viewRevenue(){
   ${utilHTML(R)}
   <div class="head-row" style="margin-top:18px;align-items:center">
     <h3 style="font-size:17px;margin:0">Bookings${car?` · ${esc(car.plate||"")} ${esc(car.make_model||"")}`:""}</h3>
-    <div class="actions">${S.downloads?`<button class="btn sm primary" data-act="rep-export">Export sheet (CSV)</button>`:""}</div>
+    <div class="actions">${S.downloads?`<button class="btn sm primary" data-act="trips-xlsx">Trips sheet (Excel)</button><button class="btn sm" data-act="rep-export">Export sheet (CSV)</button>`:""}</div>
   </div>
   <div class="filters" role="group" aria-label="Period">
     ${[["month",monthName(month)],["fy",fyName(fyY)],["all","All time"]].map(([k,l])=>`<button class="chip" aria-pressed="${range===k}" data-reprange="${k}">${esc(l)}</button>`).join("")}
   </div>
   <div class="list">${list.length? list.map(b=>{ const L=ledger(b); const st=STATUS[b.status]||STATUS.draft; const c2=carOf(b)||{};
       return `<button class="row rrow" data-open="${esc(b.id)}">
-        <span class="who"><b>${esc(b.name||"")}</b><small>${esc(fmtD(b.pickup))} → ${esc(fmtD(b.drop))} · ${L.c.days} day${L.c.days===1?"":"s"}${car?"":` · ${esc(c2.plate||"")}`}</small></span>
+        <span class="who"><b>${esc(b.name||"")}</b><small>${esc(fmtD(b.pickup))} → ${esc(fmtD(b.drop))} · ${L.c.days} day${L.c.days===1?"":"s"}${b.trip_to?` · ${esc(b.trip_to)}`:""}${car?"":` · ${esc(c2.plate||"")}`}</small></span>
         <span class="amt num">${inr(L.total)}<br><small class="${L.balance>0&&EARNED.includes(b.status)?"err":"muted"}">${L.balance>0&&EARNED.includes(b.status)?`${inr(L.balance)} due`:`paid ${inr(L.settled)}`}</small></span>
         <span class="st"><span class="pill ${st.cls}">${st.label}</span></span>
       </button>`; }).join("") : `<div class="empty">No bookings in ${esc(R.rangeLabel)}.</div>`}</div>
@@ -2467,7 +2531,7 @@ document.addEventListener("click", async e=>{
   switch(act){
     case "new": S.editId=null; S.draft=null; S.view="new"; render(); break;
     case "quick": S.editId=null; S.quick=null; S.view="quick"; S.selected=null; render(); window.scrollTo(0,0); $("#q_phone")?.focus(); break;
-    case "new-full": { const q=readQuick(); S.editId=null; S.draft={phone:q.phone, name:q.name, car_id:q.car_id, pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, adv_yes:q.adv, adv_amt:q.adv_amt, adv_mode:q.adv_mode, adv_ref:q.adv_ref}; S.view="new"; render(); window.scrollTo(0,0); break; }
+    case "new-full": { const q=readQuick(); S.editId=null; S.draft={trip_to:q.trip_to, trip_type:q.trip_type, phone:q.phone, name:q.name, car_id:q.car_id, pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, adv_yes:q.adv, adv_amt:q.adv_amt, adv_mode:q.adv_mode, adv_ref:q.adv_ref}; S.view="new"; render(); window.scrollTo(0,0); break; }
     case "goto-settings": S.view="settings"; S.selected=null; render(); window.scrollTo(0,0); break;
     case "copy-paylink": { const amt=Math.round(Number($("#u_amt")?.value)||0); if(amt>0) copy(payLinkFor(b,amt),"Payment link copied."); else toast("Enter an amount first."); break; }
     case "review-skip": { const x=S.bookings.find(y=>y.id===t.dataset.id); if(x && await patchBooking(x,{reminders:{...(x.reminders||{}), review:"skipped"}})) toast("Removed from the list."); break; }
@@ -2534,6 +2598,11 @@ document.addEventListener("click", async e=>{
     case "keep": S.confirmDelete=null; render(); break;
     case "delete": { const id=S.selected; if(await remove("bookings/"+id)){ S.bookings=S.bookings.filter(x=>x.id!==id); S.selected=null; S.confirmDelete=null; render(); toast("Booking deleted."); } break; }
     case "copy-wa": if(b) copy(confirmText(b),"Booking confirmation copied. Paste it in WhatsApp."); break;
+    case "trips-xlsx": {
+      t.disabled=true;
+      try{ const {filename, blob}=await exportTripsXlsx(); await S.downloads.save({filename, data:blob}); }
+      catch(err){ if(!(err && err.code==="declined")){ console.error(err); toast("Couldn't make the Excel file. Try again."); } }
+      t.disabled=false; break; }
     case "rep-export": {
       try{ const {filename, blob}=exportRevenueCsv(); await S.downloads.save({filename, data:blob}); }
       catch(err){ if(err && err.code==="declined") break; toast("Couldn't export. Try again."); }
@@ -2580,7 +2649,7 @@ document.addEventListener("click", async e=>{
     case "ask-del-pay": S.confirmPay=t.dataset.id; render(); break;
     case "keep-pay": S.confirmPay=null; render(); break;
     case "del-pay": { S.confirmPay=null; if(await patchBooking(b,{payments:(b.payments||[]).filter(p=>p.id!==t.dataset.id)})) toast("Entry deleted."); break; }
-    case "save-return": { if(await patchBooking(b,{odo_return:$("#r_odo").value.trim(), return_at:$("#r_at").value, fuel_return:$("#r_fuel").value})) toast("Return details saved."); break; }
+    case "save-return": { if(await patchBooking(b,{odo_return:$("#r_odo").value.trim(), return_at:$("#r_at").value, fuel_return:$("#r_fuel").value, trip_to:$("#r_tripto").value.trim(), trip_type:$("#r_triptype").value})) toast("Return details saved."); break; }
     case "suggest-add": { const x={id:"x"+Date.now().toString(36), label:t.dataset.label, amount:Number(t.dataset.amount), note:t.dataset.note}; if(await patchBooking(b,{extras:[...(b.extras||[]),x]})) toast(`${x.label} added.`); break; }
     case "add-extra": {
       const amt=Number($("#x_amount").value);
