@@ -58,7 +58,7 @@ export function money(b, s) {
 // Amount the customer should pay now: rental balance, plus the deposit before handover.
 export function dueNow(b, s) {
   const m = money(b, s);
-  const beforeHandover = ['draft', 'ready', 'sent', 'signed'].includes(b.status);
+  const beforeHandover = ['confirmed', 'draft', 'ready', 'sent', 'signed'].includes(b.status);
   return Math.max(0, m.balance) + (beforeHandover ? m.depositDue : 0);
 }
 
@@ -112,7 +112,7 @@ export function paperAlerts(car, now = new Date(), within = 30) {
 }
 
 /* the day's summary */
-const OPEN = ['draft', 'ready', 'sent', 'signed'];
+const OPEN = ['confirmed', 'draft', 'ready', 'sent', 'signed'];
 export function daySummary({ bookings, fleet, settings, now = new Date() }) {
   const t0 = istDayStart(now), t1 = new Date(t0.getTime() + DAY), t2 = new Date(t0.getTime() + 2 * DAY);
   const live = bookings.filter(b => b.status !== 'cancelled' && !b.example);

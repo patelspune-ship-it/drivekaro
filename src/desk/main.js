@@ -20,12 +20,13 @@ window.jspdf = { jsPDF };
 const CHARGE_FIELDS = [
   ["km_per_day","Km included per 24 hrs","num",""],
   ["extra_km","Extra km charge (₹ per km)","money",""],
+  ["km_tolerance","Extra km not charged up to (km)","num","Small overruns are ignored"],
   ["grace_minutes","Grace period for return (minutes)","num",""],
   ["late_per_hour","Late return (₹ per hour)","money",""],
   ["refuel_fee","Refuelling fee on top of fuel (₹)","money",""],
   ["cleaning_charge","Extra cleaning (₹)","money",""],
   ["smoking_charge","Smoke odour or pet hair (₹)","money",""],
-  ["night_charge","Night handling, 1–6 AM (₹)","money",""],
+  ["night_charge","Night pickup or drop, 1–5 AM (₹)","money",""],
   ["delivery_charge","Delivery or collection (₹)","money","0 = not charged"],
   ["damage_limit","Accident damage paid by customer, up to (₹)","money","Above this: insurance claim, customer pays what insurance doesn't"],
   ["lost_key","Lost key (₹)","money",""],
@@ -40,32 +41,34 @@ const CHARGE_FIELDS = [
   ["cancellation_terms","Cancellation by customer","text",""]
 ];
 const DEFAULT_CHARGES = {
-  km_per_day:350, extra_km:5, grace_minutes:60, late_per_hour:500, refuel_fee:500,
+  km_per_day:350, extra_km:5, km_tolerance:15, grace_minutes:60, late_per_hour:500, refuel_fee:500,
   cleaning_charge:250, smoking_charge:2000, night_charge:200, delivery_charge:0,
   damage_limit:25000,
   lost_key:3000, lost_doc:500, gps_tamper:10000, challan_fee:100,
   challan_holdback:2000, challan_days:30, deposit_refund_days:3,
   part_block_rule:"Charged as a full day",
   restricted_areas:"Ladakh, and any area that needs an Inner Line Permit or Protected Area Permit",
-  cancellation_terms:"Full refund if cancelled more than 24 hours before the Start Time; 50% of Rental Charges refunded if cancelled within 24 hours; no refund for a no-show"
+  cancellation_terms:"The advance paid to confirm the booking is non-refundable. Any other Rental Charges paid are refunded in full if cancelled more than 24 hours before the Start Time, and 50% if cancelled within 24 hours; no refund for a no-show"
 };
+const OLD_CANCEL_TERMS = "Full refund if cancelled more than 24 hours before the Start Time; 50% of Rental Charges refunded if cancelled within 24 hours; no refund for a no-show";
 const DEFAULT_SETTINGS = {
   business_name:"DriveKaro", legal_name:"DRIVEKARO SELF DRIVE CAR RENTAL", signatory:"Amaan Zakir Patel",
   address:"B, Kool Homes Solitaire, Kausarbaugh, Kondhwa, Pune 411048, Maharashtra",
   udyam:"UDYAM-MH-26-1067376", shop_act:"2631000320857751",
   support_phone:"+91 76663 98984", support_email:"hello@drivekaro.in", grievance_email:"hello@drivekaro.in", website:"drivekaro.in",
-  official_upi:"", official_bank:"", designated_location:"DriveKaro, B, Kool Homes Solitaire, Kausarbaugh, Kondhwa, Pune 411048",
+  official_upi:"", official_bank:"", pickup_map_link:"https://share.google/hf6CJB7YpvgSqTY5V", designated_location:"DriveKaro, B, Kool Homes Solitaire, Kausarbaugh, Kondhwa, Pune 411048",
   non_return_hours:24, unreachable_hours:12, return_inspection_hours:12, emergency_repair_limit:2000,
   late_interest:12, tracking_retention_days:90, fast_track_limit:200000,
   min_age:21, min_age_premium:25, dl_min_months:12,
   charges:{...DEFAULT_CHARGES}
 };
 const STATUS = {
+  confirmed:{label:"Booking confirmed", cls:"s-confirmed"},
   draft:{label:"Draft", cls:"s-draft"}, ready:{label:"Agreement ready", cls:"s-ready"}, sent:{label:"Sent for eSign", cls:"s-sent"},
   signed:{label:"Signed", cls:"s-signed"}, handed:{label:"Car handed over", cls:"s-handed"}, returned:{label:"Returned", cls:"s-returned"},
   cancelled:{label:"Cancelled", cls:"s-cancelled"}
 };
-const FLOW = ["draft","ready","sent","signed","handed","returned"];
+const FLOW = ["confirmed","draft","ready","sent","signed","handed","returned"];
 const FUEL = ["Full","3/4","1/2","1/4","Reserve"];
 const PAYMODES = ["UPI","Cash","Bank transfer","Card"];
 const IDTYPES = ["Aadhaar (masked)","Passport","Voter ID","PAN"];
@@ -143,7 +146,8 @@ async function startDesk(session){
   db.collection("customers").onSnapshot(snap=>{ S.customers = snap.docs.map(d=>({id:d.id,...d.data()})); S._custLoaded=true; softRender(); syncCustomersFromBookings(); }, onErr);
   db.collection("expenses").onSnapshot(snap=>{ S.expenses = snap.docs.map(d=>({id:d.id,...d.data()})); softRender(); }, onErr);
   preloadDrive();
-  db.doc("settings/business").onSnapshot(snap=>{ const d=snap.exists? snap.data():{}; S.settings = {...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), ...d, charges:{...DEFAULT_CHARGES, ...(d.charges||{})}}; softRender(); }, onErr);
+  db.doc("settings/business").onSnapshot(snap=>{ const d=snap.exists? snap.data():{}; S.settings = {...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), ...d, charges:{...DEFAULT_CHARGES, ...(d.charges||{})}};
+    if(S.settings.charges.cancellation_terms===OLD_CANCEL_TERMS) S.settings.charges.cancellation_terms=DEFAULT_CHARGES.cancellation_terms; softRender(); }, onErr);
 }
 async function boot(){
   $("#gateform").addEventListener("submit", async e=>{
@@ -163,7 +167,7 @@ async function boot(){
 function softRender(){
   if((S.view==="revenue" && S.expForm) || (S.view==="bookings" && S.extForm)) return;
   if(S.view==="calendar" && document.activeElement && ["cf_from","cf_to"].includes(document.activeElement.id)){ const r=$("#freeres"); if(r) r.innerHTML=freeCheckHTML(); return; }
-  if(["new","settings"].includes(S.view) || S.carEdit || S.custEdit){ refreshCarOptions(); updateSummary(); return; }
+  if(["new","settings","quick"].includes(S.view) || S.carEdit || S.custEdit){ refreshCarOptions(); updateSummary(); return; }
   if(S.view==="customers" && !S.custView){ const l=$("#custlist"); if(l){ l.innerHTML=custListHTML(); return; } }
   if(S.view==="customers" && S.custView && ($("#doc_file")?.files?.length || S.uploading)) return;
   render();
@@ -238,7 +242,7 @@ function buildAgreement(b){
   T.push({h:"4. Charges, Security Deposit and Payment", body:[
     {t:"p", text:"4.1 The Hirer shall pay the Rental Charges and other Charges stated in Schedule III. Rental Charges are payable, and the Security Deposit shall be paid or handed over, in full before handover unless Schedule III states otherwise."},
     {t:"p", text:"4.2 Rental Charges are calculated in blocks of 24 hours from the Start Time. A part block is charged as stated in Schedule III."},
-    {t:"p", text:"4.3 The Rental Charges include the kilometre allowance stated in Schedule III. Distance beyond the allowance is charged at the excess kilometre rate in Schedule III, measured by the odometer readings in the Handover Record and the Return Record. If the odometer is faulty or has been tampered with, the distance recorded by the Tracking Device is used."},
+    {t:"p", text:"4.3 The Rental Charges include the kilometre allowance stated in Schedule III. Distance beyond the allowance is charged at the excess kilometre rate in Schedule III (no charge applies if the excess is within the tolerance stated there), measured by the odometer readings in the Handover Record and the Return Record. If the odometer is faulty or has been tampered with, the distance recorded by the Tracking Device is used."},
     {t:"p", text:"4.4 The fixed charges in Schedule III for late return, fuel shortfall, cleaning, night handling, lost keys or documents and similar matters are a genuine pre-estimate of the loss DriveKaro is likely to suffer from each event and are not penalties. They do not cover damage to or loss of the Vehicle, which is dealt with in clause 10."},
     {t:"p", text:"4.5 Where DriveKaro pays any toll, fine, fuel, inter-state tax, permit fee or other amount that is the Hirer's responsibility, the Hirer shall reimburse it on demand together with the processing charge stated in Schedule III."},
     {t:"p", text:"4.6 DriveKaro is not registered under the Goods and Services Tax laws on the date of this Agreement and does not charge GST. If DriveKaro becomes registered, GST at the applicable rate shall be payable in addition to the Charges for bookings made after registration, and DriveKaro shall issue a tax invoice. DriveKaro shall issue a receipt for every amount collected."},
@@ -351,7 +355,7 @@ function buildAgreement(b){
     {t:"p", text:"11.4 If the Vehicle is detained, seized or impounded by any authority during the Booking Period because of an act or omission of an Authorised Driver, the Hirer shall inform DriveKaro within 1 hour, take all steps to secure its release, and pay all fines, release charges, towing and storage costs and rent at the daily rental rate in Schedule III for each day until release. If the seizure is caused by a defect in the Vehicle Documents or any failure of DriveKaro, DriveKaro shall bear those costs and refund the Rental Charges for the lost period."}
   ]});
   T.push({h:"12. Return of the Vehicle", body:[
-    {t:"p", text:"12.1 The Hirer shall return the Vehicle at the Designated Location by the End Time, with all keys, Vehicle Documents, accessories and Tracking Devices, with the same fuel or charge level as in the Handover Record, and in the same condition apart from fair wear and tear."},
+    {t:"p", text:"12.1 The Hirer shall return the Vehicle at the Designated Location by the End Time, with all keys, Vehicle Documents, accessories and Tracking Devices, with the same fuel or charge level as in the Handover Record, and in the same condition apart from fair wear and tear. No refund or adjustment is made for extra fuel."},
     {t:"p", text:`12.2 The Parties shall inspect the Vehicle together at return and complete the Return Record. If DriveKaro has agreed to an unattended return, DriveKaro shall inspect the Vehicle within ${s.return_inspection_hours} hours and send the Hirer the Return Record and photographs, and the Hirer may object in writing within 48 hours.`},
     {t:"p", text:"12.3 A return after the grace period stated in Schedule III attracts the hourly late return charge in Schedule III, up to the daily rate for each 24 hours of delay. This charge does not extend the Booking Period or authorise continued use."},
     {t:"p", text:"12.4 If the Vehicle is left at a place other than the Designated Location without DriveKaro's consent, the Hirer shall pay the reasonable cost of bringing it back."},
@@ -367,7 +371,7 @@ function buildAgreement(b){
     {t:"p", text:"12.8 After the Return Record is completed, the Hirer is not responsible for anything that happens to the Vehicle, except for Charges relating to the Booking Period that are notified later and for damage that could not reasonably be seen at the return inspection, such as underbody damage, notified to the Hirer with evidence within 48 hours of return."}
   ]});
   T.push({h:"13. Cancellation, Suspension and Termination", body:[
-    {t:"p", text:"13.1 The Hirer may cancel the booking before the Start Time, and refunds of the Rental Charges are made as stated in Schedule III. If the Vehicle is not handed over, the Security Deposit is refunded or returned in full."},
+    {t:"p", text:"13.1 The Hirer may cancel the booking before the Start Time, and refunds of the Rental Charges are made as stated in Schedule III. Any advance paid to confirm the booking is non-refundable if the Hirer cancels or does not turn up. If the Vehicle is not handed over, the Security Deposit is refunded or returned in full."},
     {t:"p", text:"13.2 If DriveKaro cancels before handover for any reason other than the Hirer's default, it shall refund all amounts paid in full within 7 days, or, if the Hirer agrees, provide a vehicle of the same or a higher category at no extra charge."},
     {t:"p", text:"13.3 DriveKaro may end the rental immediately by notice to the Hirer, including by WhatsApp or SMS, if:"},
     {t:"ol", items:[
@@ -507,12 +511,12 @@ function buildAgreement(b){
       ["Payment mode and reference", V([b.paymode,b.payref].filter(Boolean).join(", "))],
       ["DriveKaro's official payment accounts", V([s.official_upi && "UPI "+s.official_upi, s.official_bank && "Bank "+s.official_bank].filter(Boolean).join("; "))],
       ["Kilometre allowance", `${ch(b,"km_per_day")} km per 24 hours (${c.km||"__"} km for this booking)`],
-      ["Excess kilometre charge", `${money(b,"extra_km")} per km`],
+      ["Excess kilometre charge", `${money(b,"extra_km")} per km${Number(ch(b,"km_tolerance"))>0?` (not charged if the excess is ${ch(b,"km_tolerance")} km or less)`:""}`],
       ["Grace period for return", `${ch(b,"grace_minutes")} minutes`],
       ["Late return charge", `${money(b,"late_per_hour")} per hour, up to the daily rate per 24 hours`],
       ["Fuel shortfall", `Fuel at the prevailing pump price plus ${money(b,"refuel_fee")}`],
       ["Extra cleaning", `${money(b,"cleaning_charge")}; smoke odour or pet hair ${money(b,"smoking_charge")}`],
-      ["Night handling (1:00 AM to 6:00 AM)", money(b,"night_charge")],
+      ["Night pickup or drop (1:00 AM to 5:00 AM)", money(b,"night_charge")],
       ["Delivery or collection away from Designated Location", money(b,"delivery_charge")],
       ["Damage Limit (accident damage paid directly by Hirer)", `${money(b,"damage_limit")} per incident; above this, insurance claim and the Hirer pays the amount not paid by the insurer`],
       ["Rent while the Vehicle is at the workshop or seized", V(b.rate && `${inr(b.rate)} per day (the daily rental rate)`)],
@@ -524,6 +528,7 @@ function buildAgreement(b){
         ["Security Deposit refund", `Within ${ch(b,"deposit_refund_days")} days of return`]]
         : [["Return of Security Deposit", "When the Vehicle is returned and all amounts due are paid"]]),
       ["Restricted areas", V(ch(b,"restricted_areas"))],
+      ["Advance paid to confirm the booking", advanceOf(b)>0 ? `${inr(advanceOf(b))} (non-refundable on cancellation or no-show; adjusted against the Rental Charges)` : "None"],
       ["Cancellation by Hirer", V(ch(b,"cancellation_terms"))]
     ]}
   ]});
@@ -705,6 +710,7 @@ function renderView(){
   const m=$("#main");
   if(S.view==="bookings") m.innerHTML = S.selected ? viewDetail() : viewList();
   else if(S.view==="new"){ m.innerHTML = viewForm(); updateSummary(); }
+  else if(S.view==="quick"){ m.innerHTML = viewQuick(); qSummary(); quickCustNote(); }
   else if(S.view==="fleet") m.innerHTML = viewFleet();
   else if(S.view==="settings") m.innerHTML = viewSettings();
 }
@@ -713,7 +719,7 @@ function viewList(){
   const now=new Date();
   const active=S.bookings.filter(b=>b.status==="handed").length;
   const upcoming=S.bookings.filter(b=>!["cancelled","returned","handed"].includes(b.status) && new Date(b.pickup)>=new Date(now-864e5)).length;
-  const pending=S.bookings.filter(b=>["draft","ready","sent"].includes(b.status)).length;
+  const pending=S.bookings.filter(b=>["confirmed","draft","ready","sent"].includes(b.status)).length;
   const F={active:b=>!["returned","cancelled"].includes(b.status), all:()=>true, returned:b=>b.status==="returned", cancelled:b=>b.status==="cancelled"};
   const list=S.bookings.filter(F[S.filter]).sort((a,b)=>new Date(a.pickup)-new Date(b.pickup));
   return `
@@ -721,7 +727,7 @@ function viewList(){
     <div><h2>Bookings</h2>
       <div class="stats num"><span><b>${active}</b>cars out now</span><span><b>${upcoming}</b>upcoming</span><span><b>${pending}</b>waiting on agreement</span></div>
     </div>
-    <button class="btn primary" data-act="new">+ New booking</button>
+    <div class="actions"><button class="btn primary" data-act="quick">+ Quick booking</button><button class="btn" data-act="new">+ Full booking</button></div>
   </div>
   ${todayHTML()}
   <div class="filters" role="group" aria-label="Filter bookings">
@@ -768,8 +774,8 @@ function waButton(phone, text, label, cls="btn"){
 function suggestions(b){
   const out=[]; const c=calc(b);
   if(b.odo && b.odo_return){
-    const driven=Number(b.odo_return)-Number(b.odo), excess=Math.max(0, driven-c.km), rate=Number(ch(b,"extra_km"))||0;
-    if(driven>=0) out.push({label:"Extra kilometres", info:`${driven.toLocaleString("en-IN")} km driven, ${c.km} included`, amount:excess*rate, note:`${excess} km × ${inr(rate)}`, show:excess>0});
+    const driven=Number(b.odo_return)-Number(b.odo), over=Math.max(0, driven-c.km), tol=Number(ch(b,"km_tolerance"))||0, excess=over>tol?over:0, rate=Number(ch(b,"extra_km"))||0;
+    if(driven>=0) out.push({label:"Extra kilometres", info:`${driven.toLocaleString("en-IN")} km driven, ${c.km} included${over&&!excess?` (${over} km over, within ${tol} km tolerance)`:""}`, amount:excess*rate, note:`${excess} km × ${inr(rate)}`, show:excess>0});
   }
   if(b.return_at && b.drop){
     const late=(new Date(b.return_at)-new Date(b.drop))/6e4 - (Number(ch(b,"grace_minutes"))||0);
@@ -779,11 +785,13 @@ function suggestions(b){
       out.push({label:"Late return", info:`${hrs} hour${hrs>1?"s":""} late after grace`, amount:amt, note:`${hrs} hrs late`, show:true});
     }
   }
+  const nightN=[b.pickup, b.return_at||b.drop].filter(isNightTime).length, nc=Number(ch(b,"night_charge"))||0;
+  if(nightN && nc && !(b.extras||[]).some(x=>x.label==="Night handling")) out.push({label:"Night handling", info:`${nightN===2?"Pickup and drop":isNightTime(b.pickup)?"Pickup":"Drop"} between 1 and 5 AM`, amount:nightN*nc, note:`${nightN} × ${inr(nc)}`, show:true});
   return out.filter(s=>s.show);
 }
 function receiptText(b, p, L){
   const s=S.settings;
-  return [`Hello ${b.name}, this is ${s.business_name}.`, `We have received ${inr(p.amount)} (${PAY_KINDS[p.kind].toLowerCase()}) by ${p.mode}${p.ref?`, ref ${p.ref}`:""} on ${fmtDT(p.at)} for booking ${b.id}.`,
+  return [`Hello ${b.name}, this is ${s.business_name}.`, `We have received ${inr(p.amount)} (${payLabel(p).toLowerCase()}) by ${p.mode}${p.ref?`, ref ${p.ref}`:""} on ${fmtDT(p.at)} for booking ${b.id}.`,
     L.balance>0?`Balance due: ${inr(L.balance)}.`:`Your rental charges are paid in full.`, L.depHeld>0?`Security deposit held: ${inr(L.depHeld)}.`:"", `Thank you. ${s.support_phone}`].filter(Boolean).join("\n");
 }
 function invoiceText(b){
@@ -819,7 +827,7 @@ function invoiceHTML(b){
     <table class="inv-items"><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody>
       ${items.map(([d,a])=>`<tr><td>${esc(d)}</td><td>${inr(a)}</td></tr>`).join("")}
       <tr class="inv-total"><td>Total</td><td>${inr(L.total)}</td></tr>
-      ${L.pays.filter(p=>p.kind==="payment"||p.kind==="deposit_used").map(p=>`<tr class="inv-pay"><td>Less: ${esc(PAY_KINDS[p.kind].toLowerCase())}, ${esc(p.mode||"")}${p.ref?` ref ${esc(p.ref)}`:""}, ${esc(fmtD(p.at))}</td><td>− ${inr(p.amount)}</td></tr>`).join("")}
+      ${L.pays.filter(p=>p.kind==="payment"||p.kind==="deposit_used").map(p=>`<tr class="inv-pay"><td>Less: ${esc(payLabel(p).toLowerCase())}, ${esc(p.mode||"")}${p.ref?` ref ${esc(p.ref)}`:""}, ${esc(fmtD(p.at))}</td><td>− ${inr(p.amount)}</td></tr>`).join("")}
       <tr class="inv-total"><td>${L.balance>0?"Balance due":L.balance<0?"Excess paid, to be refunded":"Balance due"}</td><td>${inr(Math.abs(L.balance))}</td></tr>
     </tbody></table>
     ${L.balance<=0?`<p class="inv-stamp">${L.balance<0?"EXCESS PAID":"PAID IN FULL"}</p>`:""}
@@ -849,7 +857,7 @@ function invoicePdf(b, qr){
   const row=(d,a,bold)=>{ doc.setFont("helvetica",bold?"bold":"normal"); const dl=wrap(d,CW-40); dl.forEach((l,i)=>t(l,M+2,y+i*4.5)); t(a,W-M-2,y,{align:"right"}); y+=dl.length*4.5+2.5; };
   items.forEach(([d,a])=>row(d,inr(a)));
   doc.line(M,y-2,W-M,y-2); y+=2; row("Total",inr(L.total),true);
-  L.pays.filter(p=>p.kind==="payment"||p.kind==="deposit_used").forEach(p=>row(`Less: ${PAY_KINDS[p.kind].toLowerCase()}, ${p.mode||""}${p.ref?` ref ${p.ref}`:""}, ${fmtD(p.at)}`, "- "+inr(p.amount)));
+  L.pays.filter(p=>p.kind==="payment"||p.kind==="deposit_used").forEach(p=>row(`Less: ${payLabel(p).toLowerCase()}, ${p.mode||""}${p.ref?` ref ${p.ref}`:""}, ${fmtD(p.at)}`, "- "+inr(p.amount)));
   doc.line(M,y-2,W-M,y-2); y+=2; row(L.balance<0?"Excess paid, to be refunded":"Balance due", inr(Math.abs(L.balance)), true);
   if(L.balance<=0){ doc.setTextColor(30,120,70); doc.setFont("helvetica","bold"); doc.setFontSize(12); t(L.balance<0?"EXCESS PAID":"PAID IN FULL",M,y+4); doc.setTextColor(0); doc.setFontSize(9); y+=10; }
   doc.setFont("helvetica","normal");
@@ -891,7 +899,7 @@ function viewPayments(b){
     <div id="payerr"></div>
     <div class="actions" style="margin-top:10px"><button type="button" class="btn primary" data-act="add-pay">Add entry</button></div>
     ${L.pays.length?`<div class="tablewrap"><table class="ptable num"><thead><tr><th>Date</th><th>Type</th><th>Mode</th><th style="text-align:right">Amount</th><th></th></tr></thead><tbody>
-      ${L.pays.map(p=>`<tr><td>${esc(fmtDT(p.at))}</td><td>${esc(PAY_KINDS[p.kind])}</td><td>${esc(p.mode||"")}${p.ref?`<br><small class="muted">${esc(p.ref)}</small>`:""}</td><td style="text-align:right">${p.kind==="deposit_refund"?"− ":""}${inr(p.amount)}</td>
+      ${L.pays.map(p=>`<tr><td>${esc(fmtDT(p.at))}</td><td>${esc(payLabel(p))}</td><td>${esc(p.mode||"")}${p.ref?`<br><small class="muted">${esc(p.ref)}</small>`:""}</td><td style="text-align:right">${p.kind==="deposit_refund"?"− ":""}${inr(p.amount)}</td>
         <td class="rowact">${waButton(b.phone, receiptText(b,p,L), "Receipt", "btn sm")}${S.confirmPay===p.id?`<button class="btn sm danger" data-act="del-pay" data-id="${esc(p.id)}">Confirm delete</button><button class="btn sm" data-act="keep-pay">Keep</button>`:`<button class="btn sm" data-act="ask-del-pay" data-id="${esc(p.id)}" aria-label="Delete entry">Delete</button>`}</td></tr>`).join("")}
     </tbody></table></div>`:`<p class="muted" style="margin:12px 0 0;font-size:14px">No payments recorded yet.</p>`}
   </section>
@@ -937,7 +945,7 @@ function viewDetail(){
   const car=carOf(b)||{}; const c=calc(b); const st=STATUS[b.status]||STATUS.draft;
   const vErr = validate(b,true); const missing = Object.keys(vErr);
   const idx = FLOW.indexOf(b.status);
-  const stepLabels={draft:"Details entered",ready:"Agreement ready",sent:"Sent for Aadhaar eSign",signed:"Signed by both",handed:"Car handed over",returned:"Car returned"};
+  const stepLabels={confirmed:"Booking confirmed",draft:"Details entered",ready:"Agreement ready",sent:"Sent for Aadhaar eSign",signed:"Signed by both",handed:"Car handed over",returned:"Car returned"};
   const canDownload = !!S.downloads && !!window.jspdf;
   return `
   <div class="head-row"><div><button class="btn sm" data-act="back">← All bookings</button></div></div>
@@ -961,7 +969,8 @@ function viewDetail(){
           <dt>Rental</dt><dd>${c.days?inr(c.rental):"—"}${c.extAmt?`<br><small class="muted">incl. ${inr(c.extAmt)} extension</small>`:""}</dd>
           ${c.delivery?`<dt>Delivery</dt><dd>${inr(c.delivery)}</dd>`:""}
           <dt>Security deposit</dt><dd>${esc(depShort(b))}</dd>
-          <dt class="total">Collect before handover</dt><dd class="total">${c.days?inr(c.collected):"—"}</dd>
+          ${advanceOf(b)?`<dt>Advance paid</dt><dd>− ${inr(advanceOf(b))}</dd>`:""}
+          <dt class="total">${["handed","returned"].includes(b.status)?"Total with deposit":"Collect before handover"}</dt><dd class="total">${c.days?inr(["handed","returned"].includes(b.status)?c.collected:dueNow(b,S.settings)):"—"}</dd>
           <dt>Km included</dt><dd>${c.km} km</dd>
         </dl>
         ${(()=>{ const L=ledger(b); return `<div class="moneyline"><span>Paid <b class="num">${inr(L.settled)}</b></span><span class="${L.balance>0?"bad":"ok"}">${L.balance>0?`Due <b class="num">${inr(L.balance)}</b>`:"Paid in full"}</span><button class="btn sm" data-dtab="payments">Payments</button></div>`; })()}
@@ -975,9 +984,9 @@ function viewDetail(){
         <div class="actions">
           <button class="btn" data-act="edit" ${["handed","returned"].includes(b.status)?"disabled":""}>Edit details and charges</button>
           ${custOfBooking(b)?`<button class="btn" data-custview="${esc(custOfBooking(b).id)}">Customer profile</button>`:""}
-          ${waButton(b.phone, summaryText(b), "WhatsApp booking details")}
+          ${["handed","returned","cancelled"].includes(b.status)?"":waButton(b.phone, confirmText(b), "WhatsApp booking confirmation")}
           ${reminderButtonsHTML(b)}
-          <button class="btn" data-act="copy-wa">Copy booking summary</button>
+          <button class="btn" data-act="copy-wa">Copy confirmation</button>
           ${b.status!=="cancelled" && !["handed","returned"].includes(b.status) ? `<button class="btn danger" data-act="cancel-booking">Cancel booking</button>`:""}
           <button class="btn danger" data-act="ask-delete">Delete</button>
         </div>
@@ -1035,6 +1044,8 @@ function signedFilesHTML(b){
 }
 
 function nextStep(b, missing){
+  if(b.status==="confirmed") return `<p style="margin:0 0 10px;font-size:14px">Booking confirmed${advanceOf(b)?` with ${inr(advanceOf(b))} advance`:" (no advance yet)"}. Balance at pickup: <b>${inr(dueNow(b,S.settings))}</b>. Send the confirmation now; when the customer comes, add their details to make the agreement.</p>
+    <div class="actions">${waButton(b.phone, confirmText(b), "Send booking confirmation", "btn primary")}<button class="btn" data-act="edit">Add customer details</button></div>`;
   if(b.status==="draft") return missing.length
     ? `<p style="margin:0 0 10px;font-size:14px">Fill the missing details to make the agreement ready for signing.</p><button class="btn primary" data-act="edit">Complete details</button>`
     : `${softNote(b)}<p style="margin:0 0 10px;font-size:14px">The essentials are filled. You can send this agreement now.</p><div class="actions"><button class="btn primary" data-act="status" data-to="ready">Make agreement ready</button><button class="btn" data-act="edit">Add more details</button></div>`;
@@ -1138,13 +1149,14 @@ function pickCar(id){
   const r=$("#f_rate"), d=$("#f_deposit");
   if(r && (!r.value || r.dataset.auto)){ r.value=car.rate||""; r.dataset.auto="1"; }
   if(d && (!d.value || d.dataset.auto)){ d.value=car.deposit??""; d.dataset.auto="1"; }
-  refreshCarOptions(); updateSummary();
+  refreshCarOptions(); updateSummary(); qSummary();
 }
 
 const FORM_MAP={name:"f_name",father:"f_father",dob:"f_dob",phone:"f_phone",alt_phone:"f_alt",email:"f_email",address:"f_address",emergency:"f_emergency",
   dl:"f_dl",dl_till:"f_dl_till",rto:"f_rto",id_type:"f_idtype",aadhaar4:"f_aadhaar4",
   addl_name:"f_addl_name",addl_dob:"f_addl_dob",addl_phone:"f_addl_phone",addl_dl:"f_addl_dl",addl_dl_till:"f_addl_dl_till",
   customer_id:"f_custid",car_id:"f_car",pickup:"f_pickup",drop:"f_drop",location:"f_location",rate:"f_rate",deposit_type:"f_deptype",deposit:"f_deposit",dep_bike_no:"f_depbike",dep_bike_model:"f_depbikemodel",dep_doc_type:"f_depdoc",dep_doc_details:"f_depdocdet",paymode:"f_paymode",payref:"f_payref",
+  adv_yes:"f_advyes",adv_amt:"f_advamt",adv_mode:"f_advmode",adv_ref:"f_advref",
   odo:"f_odo",fuel:"f_fuel",keys:"f_keys",ext_damage:"f_ext",int_damage:"f_int",notes:"f_notes"};
 
 function viewForm(errs={}){
@@ -1221,6 +1233,13 @@ function viewForm(errs={}){
         ${fieldHTML("f_addl_dl_till","Licence valid till",g("addl_dl_till"),{type:"date",err:errs.addl_dl_till})}
       </div></fieldset>
       <fieldset><legend>6 · Payment and handover ${sub("(can be filled at pickup)")}</legend><div class="grid">
+        ${(()=>{ const ex=S.editId?S.bookings.find(x=>x.id===S.editId):null; const a=ex?advanceOf(ex):0;
+          if(a) return `<div class="field wide"><p class="note" style="margin:0">Advance received: <b>${inr(a)}</b>. It is deducted from the amount due. To change it, use the Payments tab.</p></div>`;
+          const on=g("adv_yes")==="yes", hid=on?"":"hidden";
+          return `${selectHTML("f_advyes","Advance received?",g("adv_yes")||"no",[["no","No"],["yes","Yes"]])}
+          <div class="field advf" ${hid}><label for="f_advamt">Advance amount (₹)</label><input id="f_advamt" type="number" min="1" inputmode="numeric" value="${esc(g("adv_amt"))}"></div>
+          <div class="field advf" ${hid}><label for="f_advmode">Advance paid by</label><select id="f_advmode">${PAYMODES.map(m=>`<option ${m===(g("adv_mode")||"UPI")?"selected":""}>${m}</option>`).join("")}</select></div>
+          <div class="field advf" ${hid}><label for="f_advref">Advance reference</label><input id="f_advref" value="${esc(g("adv_ref"))}"></div>`; })()}
         ${selectHTML("f_paymode","Payment mode",g("paymode"),[["",""],...PAYMODES.map(p=>[p,p])])}
         ${fieldHTML("f_payref","Payment reference",g("payref"),{hint:"UPI or bank reference, if paid"})}
         ${fieldHTML("f_odo","Odometer (km)",g("odo"),{type:"number",attrs:'min="0" inputmode="numeric"'})}
@@ -1269,7 +1288,7 @@ function updateSummary(){
     <dt>Rental</dt><dd>${c.days&&b.rate?`${c.days} × ${inr(b.rate)} = ${inr(c.rental)}`:"—"}</dd>
     ${c.delivery?`<dt>Delivery</dt><dd>${inr(c.delivery)}</dd>`:""}
     <dt>Security deposit</dt><dd>${esc(depShort(b))}</dd>
-    <dt class="total">Collect before handover</dt><dd class="total">${c.days&&b.rate?inr(c.collected):"—"}</dd>
+    ${(()=>{ const ex=S.editId?S.bookings.find(x=>x.id===S.editId):null; const a=ex?advanceOf(ex):(b.adv_yes==="yes"?Number(b.adv_amt)||0:0); return a?`<dt>Advance paid</dt><dd>− ${inr(a)}</dd><dt class="total">Balance at pickup</dt><dd class="total">${c.days&&b.rate?inr(Math.max(0,c.collected-a)):"—"}</dd>`:`<dt class="total">Collect before handover</dt><dd class="total">${c.days&&b.rate?inr(c.collected):"—"}</dd>`; })()}
     <dt>Km included</dt><dd>${c.km?c.km+" km":"—"}</dd>
     <dt>Extra km</dt><dd>${money(b,"extra_km")}/km</dd>
 `;
@@ -1414,6 +1433,7 @@ function viewSettings(){
       ${fieldHTML("s_bank","Official bank account",g("official_bank"),{hint:"Account no. and IFSC"})}
       ${fieldHTML("s_address","Business address",g("address"),{type:"textarea",wide:1})}
       ${fieldHTML("s_loc","Default handover location",g("designated_location"),{wide:1})}
+      ${fieldHTML("s_map","Pickup location map link",g("pickup_map_link"),{wide:1,attrs:'inputmode="url"',hint:"Google Maps link sent in the booking confirmation."})}
     </div></fieldset>
     <fieldset><legend>DriveKaro's signature</legend>
       <p class="muted" style="font-size:14px;margin:0 0 8px">Choose <b>Printed</b> to put your signature on every agreement and send the eSign only to the customer (one Aadhaar eSign per booking). Sign on plain white paper with a dark pen and take a clear photo.</p>
@@ -1756,6 +1776,135 @@ function depFieldsHTML(g, errs){
 }
 function showDepFields(){ const t=$("#f_deptype")?.value||"cash"; document.querySelectorAll(".depf").forEach(el=>el.hidden = el.dataset.dep!==t); }
 
+/* ---------- advance and quick booking ---------- */
+function advanceOf(b){ return (b.payments||[]).filter(p=>p.advance).reduce((t,p)=>t+(Number(p.amount)||0),0); }
+function payLabel(p){ return p.advance ? "Advance received" : PAY_KINDS[p.kind]; }
+function carSnapshot(car){
+  return car ? {make_model:car.make_model, plate:car.plate, colour:car.colour||"", year:car.year||"", fuel:car.fuel||"", transmission:car.transmission||"", category:car.category||"", seats:car.seats||"", chassis_last5:car.chassis_last5||"", reg_type:car.reg_type||"", permit_no:car.permit_no||"", insurance_no:car.insurance_no||"", insurer:car.insurer||"", insurance_till:car.insurance_till||"", idv:car.idv||"", puc_till:car.puc_till||"", fastag:car.fastag||""} : null;
+}
+function isNightTime(s){ const d=new Date(s); if(isNaN(d)) return false; const h=d.getHours(); return h>=1 && h<5; }
+// The customer's booking confirmation, in DriveKaro's own format.
+function confirmText(b){
+  const s=S.settings, car=carOf(b)||{}, c=calc(b), L=ledger(b), adv=advanceOf(b);
+  const due=dueNow(b,s), link=payLinkFor(b,due);
+  const dep=depType(b)==="cash" ? (Number(b.deposit)||0) : 0;
+  const lim=Number(ch(b,"km_per_day"))||0, tol=Number(ch(b,"km_tolerance"))||0;
+  const dmg=Number(ch(b,"damage_limit"))||0;
+  const where=s.pickup_map_link || b.location || s.designated_location;
+  const lines=[
+    `*BOOKING CONFIRMED – ${String(s.business_name||"DriveKaro").toUpperCase()}*`, ``,
+    `This message confirms your self-drive car booking with ${s.business_name}. The booking details and terms are mentioned below. Please review carefully.`, ``,
+    `Booking ID: ${b.id}`,
+    b.name?`Name: ${b.name}`:null,
+    `Car Details: ${car.make_model||""}${car.fuel&&!String(car.make_model||"").toUpperCase().includes(String(car.fuel).toUpperCase())?` ${car.fuel}`:""}${car.plate?` (${car.plate})`:""}`,
+    `Pickup Date & Time: ${fmtDT(b.pickup)}`,
+    `Drop Date & Time: ${fmtDT(b.drop)}`,
+    `Rent: ${inr(c.rental)} (${c.days} day${c.days===1?"":"s"})`,
+    c.delivery?`Delivery: ${inr(c.delivery)}`:null,
+    dep?`Security Deposit: ${inr(dep)} (refundable after return)`:depType(b)!=="cash"?`Security Deposit: ${depShort(b)} (returned after the trip)`:null,
+    `Advance Paid: ${inr(adv)}`,
+    `Balance Amount: ${inr(due)} (payable at pickup)`,
+    link?`Pay online: ${link}`:null,
+    `Car Pickup Location: ${where}`, ``,
+    `*Terms & Conditions:*`, ``,
+    `• The daily usage limit is ${lim} km. Any usage beyond this limit will be charged at ${inr(ch(b,"extra_km"))} per km.${tol?` Up to ${tol} km over the limit is not charged.`:""}`,
+    `• The vehicle must be returned with the same fuel level as provided at pickup. Any extra fuel will not be refunded or adjusted in the rental amount.`,
+    `• If the vehicle interior is found dirty at the time of return, a cleaning charge of ${inr(ch(b,"cleaning_charge"))} will be applicable. Exterior dirt will not be considered.`,
+    Number(ch(b,"night_charge"))>0?`• Night charges of ${inr(ch(b,"night_charge"))} will apply if vehicle pickup or drop occurs between 1:00 AM and 5:00 AM.`:null,
+    `• Any damage to the vehicle during the booking period must be reimbursed by the customer${dmg?`, up to ${inr(dmg)} per incident. Above that, we claim insurance and the customer pays whatever the insurance does not cover, plus rent for the days the car is in the garage`:""}. Repairs through third-party garages or acquaintances will not be accepted.`,
+    `• In case of booking cancellation or no-show, the advance amount paid is strictly non-refundable.`,
+    `• The customer will be responsible for any traffic fines, challans, towing charges, or legal liabilities incurred during the booking period.`,
+    `• Please bring your original driving licence at pickup. The rental agreement is signed by Aadhaar OTP (eSign) before handover, and its full terms apply.`,
+    ``,
+    `By proceeding with this booking, you acknowledge and agree to all the above terms and conditions.`, ``,
+    `For assistance, contact: ${String(s.support_phone||"").replace(/^\+91\s*/,"").replace(/\s/g,"")}`,
+    `${s.business_name} – Self Drive Car Rentals`
+  ];
+  return lines.filter(l=>l!==null).join("\n");
+}
+function quickTotals(q){
+  const b={pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, deposit_type:"cash"};
+  const c=calc(b); const adv=q.adv==="yes"?(Number(q.adv_amt)||0):0;
+  return {c, adv, total:c.rental+c.deposit, balance:Math.max(0,c.rental+c.deposit-adv)};
+}
+function readQuick(){
+  const v=id=>($("#"+id)?.value??"").trim();
+  return {phone:v("q_phone"), name:v("q_name"), car_id:v("f_car"), pickup:v("f_pickup"), drop:v("f_drop"), rate:v("f_rate"), deposit:v("f_deposit"), adv:v("q_adv"), adv_amt:v("q_advamt"), adv_mode:v("q_advmode"), adv_ref:v("q_advref")};
+}
+function viewQuick(errs={}){
+  const q=S.quick||{adv:"yes", adv_mode:"UPI"}; const g=k=>q[k]??"";
+  const hide=q.adv==="no"?"hidden":"";
+  return `
+  <div class="head-row"><div><h2>Quick booking</h2><div class="muted" style="font-size:14px">Confirm a booking when the advance comes in. Add the customer's full details at pickup.</div></div>
+    <button class="btn sm" data-act="new-full">Full booking form</button></div>
+  <form id="qform" novalidate>
+    <fieldset><legend>Customer</legend><div class="grid">
+      ${fieldHTML("q_phone","Mobile number",g("phone"),{type:"tel",req:1,err:errs.phone,attrs:'inputmode="tel" autocomplete="off" placeholder="98220 12345"'})}
+      ${fieldHTML("q_name","Name",g("name"),{hint:"Optional now"})}
+    </div><div id="q_custnote"></div></fieldset>
+    <fieldset><legend>Car and dates</legend><div class="grid">
+      ${fieldHTML("f_pickup","Pickup date and time",g("pickup"),{type:"datetime-local",req:1,err:errs.dates})}
+      ${fieldHTML("f_drop","Drop-off date and time",g("drop"),{type:"datetime-local",req:1})}
+    </div>
+    <input type="hidden" id="f_car" value="${esc(g("car_id"))}">
+    <div id="carpick" style="margin-top:12px">${pickGridHTML(g("car_id"), g("pickup"), g("drop"))}</div>
+    ${errs.car?`<div class="err" style="margin-top:6px">${esc(errs.car)}</div>`:""}</fieldset>
+    <fieldset><legend>Amount</legend><div class="grid">
+      ${fieldHTML("f_rate","Rent per day (₹)",g("rate"),{type:"number",req:1,err:errs.rate,attrs:'min="0" inputmode="numeric"'})}
+      ${fieldHTML("f_deposit","Security deposit (₹)",g("deposit"),{type:"number",attrs:'min="0" inputmode="numeric"',hint:"Refundable. Change the type later if you take a bike or document."})}
+      ${selectHTML("q_adv","Advance received?",g("adv")||"yes",[["yes","Yes"],["no","No, not yet"]])}
+      <div class="field qadvf" ${hide}><label for="q_advamt">Advance amount (₹) <em>*</em></label><input id="q_advamt" type="number" min="1" inputmode="numeric" value="${esc(g("adv_amt"))}" ${errs.adv?'aria-invalid="true"':""}>${errs.adv?`<span class="err">${esc(errs.adv)}</span>`:""}</div>
+      <div class="field qadvf" ${hide}><label for="q_advmode">Paid by</label><select id="q_advmode">${PAYMODES.map(m=>`<option ${m===(g("adv_mode")||"UPI")?"selected":""}>${m}</option>`).join("")}</select></div>
+      <div class="field qadvf" ${hide}><label for="q_advref">UPI / bank reference</label><input id="q_advref" value="${esc(g("adv_ref"))}"></div>
+    </div>
+    <div id="q_sum" class="qsum"></div></fieldset>
+    <div id="qerrs"></div>
+    <div class="actions"><button type="submit" class="btn primary">Save and confirm booking</button></div>
+  </form>`;
+}
+function qSummary(){
+  const box=$("#q_sum"); if(!box) return; const q=readQuick(); const T=quickTotals(q); const c=T.c;
+  if(!q.pickup||!q.drop){ box.innerHTML=`<span class="muted">Set pickup and drop-off to see the amount.</span>`; return; }
+  if(new Date(q.drop)<=new Date(q.pickup)){ box.innerHTML=`<span class="err">Drop-off must be after pickup.</span>`; return; }
+  const night=[isNightTime(q.pickup)&&"pickup", isNightTime(q.drop)&&"drop"].filter(Boolean);
+  box.innerHTML=`<dl class="kv num">
+    <dt>Rent</dt><dd>${c.days} day${c.days===1?"":"s"} × ${inr(q.rate)} = ${inr(c.rental)}</dd>
+    <dt>Security deposit</dt><dd>${inr(c.deposit)}</dd>
+    <dt>Advance paid</dt><dd>− ${inr(T.adv)}</dd>
+    <dt class="total">Balance at pickup</dt><dd class="total">${inr(T.balance)}</dd>
+  </dl>${night.length?`<p class="note" style="margin:8px 0 0">Night charge ${money({},"night_charge")} applies (${night.join(" and ")} between 1 and 5 AM). Add it at return in Payments.</p>`:""}`;
+}
+function quickCustNote(){
+  const box=$("#q_custnote"); if(!box) return; const p=normPhone($("#q_phone")?.value);
+  const c=p.length===10?custById(p):null;
+  if(!c){ box.innerHTML=p.length===10?`<p class="muted" style="margin:8px 0 0;font-size:13px">New customer.</p>`:""; return; }
+  const n=custBookings(c).length;
+  box.innerHTML=`<p class="note" style="margin:10px 0 0">Returning customer: <b>${esc(c.name||"")}</b>${n?` · ${n} booking${n===1?"":"s"}`:""}${c.blocked?` · <span class="err">marked Do not rent</span>`:""}. Their saved details will fill in.</p>`;
+  const nm=$("#q_name"); if(nm && !nm.value) nm.value=c.name||"";
+}
+async function saveQuick(){
+  const q=readQuick(); const errs={};
+  if(!PHONE_RE.test(q.phone)) errs.phone="Enter a valid 10-digit mobile number.";
+  if(!q.pickup||!q.drop||new Date(q.drop)<=new Date(q.pickup)) errs.dates="Set pickup and a later drop-off.";
+  if(!q.car_id) errs.car="Pick a car.";
+  if(!(Number(q.rate)>0)) errs.rate="Enter the rent per day.";
+  if(q.adv==="yes" && !(Number(q.adv_amt)>0)) errs.adv="Enter the advance amount.";
+  const clash=!errs.dates && q.car_id ? clashFor(q.car_id,q.pickup,q.drop,null) : null;
+  if(clash) errs.car=`This car is already booked by ${clash.name||"another customer"} (${fmtDT(clash.pickup)} to ${fmtDT(clash.drop)}).`;
+  if(Object.keys(errs).length){ S.quick=q; $("#main").innerHTML=viewQuick(errs); qSummary(); quickCustNote(); $("#qerrs").innerHTML=`<div class="errors">Fix ${Object.keys(errs).length} thing${Object.keys(errs).length>1?"s":""} before saving.</div>`; document.querySelector('[aria-invalid="true"]')?.focus(); return; }
+  const existing=custById(normPhone(q.phone));
+  const cust=await upsertCustomerFrom({phone:q.phone, name:q.name});
+  const car=S.fleet.find(c=>c.id===q.car_id); const id=newId(); const now=new Date().toISOString();
+  const kyc={}; if(existing) for(const k of KYC_FIELDS) if(existing[k]) kyc[k]=existing[k];
+  const doc={...kyc, id, status:"confirmed", name:q.name||existing?.name||"", phone:fmtPhone(q.phone), customer_id:cust?.id||"",
+    car_id:q.car_id, car_snapshot:carSnapshot(car), pickup:q.pickup, drop:q.drop, rate:Number(q.rate), deposit:Number(q.deposit)||0, deposit_type:"cash",
+    charges:defaultCharges(), payments: q.adv==="yes" ? [{id:"p"+Date.now().toString(36), kind:"payment", advance:true, amount:Number(q.adv_amt), mode:q.adv_mode||"UPI", ref:q.adv_ref, at:toLocalInput()}] : [],
+    created_at:now, updated_at:now, confirmed_at:now, agreement_date:toLocalInput().slice(0,10), template_version:"2.0", quick:true};
+  if(!(await write("bookings/"+id, doc))) return;
+  localUpsert(S.bookings, doc); S.quick=null; S.view="bookings"; S.selected=id; S.detailTab="overview"; render(); window.scrollTo(0,0);
+  toast("Booking confirmed. Send the confirmation on WhatsApp.");
+}
+
 /* ---------- UPI payments ---------- */
 function upiFor(b, amount){ const s=S.settings; return s.official_upi ? upiLink({upi:s.official_upi, name:s.legal_name, amount, note:`${s.business_name||"DriveKaro"} ${b.id}`}) : ""; }
 function payLinkFor(b, amount){ return S.settings.official_upi && amount>0 ? payUrl(location.origin, b.id, amount) : ""; }
@@ -1813,7 +1962,7 @@ function remindBtn(kind, b, label, cls="btn sm"){
 }
 function reminderButtonsHTML(b){
   const out=[];
-  if(["ready","sent","signed"].includes(b.status)) out.push(remindBtn("pickup",b,"Pickup reminder","btn"));
+  if(["confirmed","ready","sent","signed"].includes(b.status)) out.push(remindBtn("pickup",b,"Pickup reminder","btn"));
   if(b.status==="handed") out.push(remindBtn("return",b,"Return reminder","btn"));
   if(b.status==="returned") out.push(remindBtn("review",b,"Ask for Google review","btn"));
   return out.join("");
@@ -2064,7 +2213,7 @@ function viewCalendar(){
           return `<button class="calbar st-${esc(b.status)}" style="left:${(p*100).toFixed(3)}%;width:${Math.max(0.8,(q-p)*100).toFixed(3)}%" data-open="${esc(b.id)}" title="${esc(`${b.name||""} · ${fmtDT(b.pickup)} to ${fmtDT(bookingEnd(b))} · ${st.label}`)}"><span>${esc((b.name||"Booking").split(" ")[0])}</span></button>`; }).join("")}
       </div></div>`).join("")}
   </div></div>
-  <div class="legend"><span><i class="st-handed"></i>Car out</span><span><i class="st-signed"></i>Signed</span><span><i class="st-ready"></i>Agreement ready / sent</span><span><i class="st-draft"></i>Draft</span><span><i class="st-returned"></i>Returned</span></div>`
+  <div class="legend"><span><i class="st-handed"></i>Car out</span><span><i class="st-signed"></i>Signed</span><span><i class="st-ready"></i>Agreement ready / sent</span><span><i class="st-confirmed"></i>Confirmed (advance)</span><span><i class="st-draft"></i>Draft</span><span><i class="st-returned"></i>Returned</span></div>`
   : `<div class="list"><div class="empty"><h3>No cars yet</h3>Add your cars in Fleet to see the calendar.</div></div>`}`;
 }
 function startBookingFor(carId, pickup, drop){
@@ -2125,7 +2274,7 @@ function exportExpensesCsv(){
 
 /* ---------- revenue ---------- */
 const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const EARNED=["handed","returned"], UPCOMING=["ready","sent","signed"];
+const EARNED=["handed","returned"], UPCOMING=["confirmed","ready","sent","signed"];
 function ym(d){ const x=new Date(d); return isNaN(x)?"":`${x.getFullYear()}-${pad(x.getMonth()+1)}`; }
 function fyStartYear(d){ const x=new Date(d); return x.getMonth()>=3 ? x.getFullYear() : x.getFullYear()-1; }
 function fyName(y){ return `FY ${String(y).slice(2)}-${String(y+1).slice(2)}`; }
@@ -2237,7 +2386,7 @@ async function saveBooking(asDraft){
   const car = S.fleet.find(c=>c.id===f.car_id);
   const complete = Object.keys(errsFull).length===0;
   let status = prev?.status || "draft";
-  if(["draft","ready"].includes(status)) status = (!asDraft && complete) ? "ready" : "draft";
+  if(["confirmed","draft","ready"].includes(status)) status = (!asDraft && complete) ? "ready" : (status==="confirmed" ? "confirmed" : "draft");
   const id = prev?.id || newId();
   const cust = await upsertCustomerFrom(f); if(cust) f.customer_id = cust.id;
   const doc = {...(prev||{}), ...f, phone: fmtPhone(f.phone), id, status,
@@ -2246,6 +2395,9 @@ async function saveBooking(asDraft){
     created_at: prev?.created_at || new Date().toISOString(), updated_at:new Date().toISOString(),
     agreement_date: prev?.agreement_date || toLocalInput().slice(0,10), template_version:"2.0"};
   delete doc.example;
+  const advAmt=Number(f.adv_amt)||0;
+  if(f.adv_yes==="yes" && advAmt>0 && !(doc.payments||[]).some(p=>p.advance)) doc.payments=[...(doc.payments||[]), {id:"p"+Date.now().toString(36), kind:"payment", advance:true, amount:advAmt, mode:f.adv_mode||"UPI", ref:f.adv_ref||"", at:toLocalInput()}];
+  ["adv_yes","adv_amt","adv_mode","adv_ref"].forEach(k=>delete doc[k]);
   if(!(await write("bookings/"+id, doc))) return;
   localUpsert(S.bookings, doc);
   S.editId=null; S.draft=null; S.view="bookings"; S.selected=id; S.detailTab=isMobile()?"overview":"agreement"; render(); window.scrollTo(0,0);
@@ -2314,6 +2466,8 @@ document.addEventListener("click", async e=>{
   const b = S.selected ? S.bookings.find(x=>x.id===S.selected) : null;
   switch(act){
     case "new": S.editId=null; S.draft=null; S.view="new"; render(); break;
+    case "quick": S.editId=null; S.quick=null; S.view="quick"; S.selected=null; render(); window.scrollTo(0,0); $("#q_phone")?.focus(); break;
+    case "new-full": { const q=readQuick(); S.editId=null; S.draft={phone:q.phone, name:q.name, car_id:q.car_id, pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, adv_yes:q.adv, adv_amt:q.adv_amt, adv_mode:q.adv_mode, adv_ref:q.adv_ref}; S.view="new"; render(); window.scrollTo(0,0); break; }
     case "goto-settings": S.view="settings"; S.selected=null; render(); window.scrollTo(0,0); break;
     case "copy-paylink": { const amt=Math.round(Number($("#u_amt")?.value)||0); if(amt>0) copy(payLinkFor(b,amt),"Payment link copied."); else toast("Enter an amount first."); break; }
     case "review-skip": { const x=S.bookings.find(y=>y.id===t.dataset.id); if(x && await patchBooking(x,{reminders:{...(x.reminders||{}), review:"skipped"}})) toast("Removed from the list."); break; }
@@ -2379,7 +2533,7 @@ document.addEventListener("click", async e=>{
     case "ask-delete": S.confirmDelete=S.selected; render(); break;
     case "keep": S.confirmDelete=null; render(); break;
     case "delete": { const id=S.selected; if(await remove("bookings/"+id)){ S.bookings=S.bookings.filter(x=>x.id!==id); S.selected=null; S.confirmDelete=null; render(); toast("Booking deleted."); } break; }
-    case "copy-wa": if(b) copy(summaryText(b),"Booking summary copied. Paste it in WhatsApp."); break;
+    case "copy-wa": if(b) copy(confirmText(b),"Booking confirmation copied. Paste it in WhatsApp."); break;
     case "rep-export": {
       try{ const {filename, blob}=exportRevenueCsv(); await S.downloads.save({filename, data:blob}); }
       catch(err){ if(err && err.code==="declined") break; toast("Couldn't export. Try again."); }
@@ -2491,6 +2645,9 @@ document.addEventListener("input", e=>{
   if(e.target.id==="e_drop") updateExtInfo();
   if(e.target.id==="e_amount") delete e.target.dataset.auto;
   if(e.target.id==="u_amt") onUpiAmount();
+  if(e.target.id==="q_phone") quickCustNote();
+  if(e.target.closest("#qform") && e.target.getAttribute("aria-invalid")){ e.target.removeAttribute("aria-invalid"); e.target.parentElement.querySelector(".err")?.remove(); }
+  if(e.target.closest("#qform")) qSummary();
   if(e.target.closest("#bform")) updateSummary();
 });
 document.addEventListener("focusin", e=>{ if(e.target.id==="f_phone") renderCustDropdown(); });
@@ -2500,6 +2657,9 @@ document.addEventListener("keydown", e=>{ if(e.target.id==="f_phone" && e.key===
 document.addEventListener("change", e=>{
   if(e.target.id==="f_pickup"||e.target.id==="f_drop") refreshCarOptions();
   if(e.target.id==="f_deptype") showDepFields();
+  if(e.target.id==="q_adv") document.querySelectorAll(".qadvf").forEach(el=>el.hidden=e.target.value!=="yes");
+  if(e.target.id==="f_advyes") document.querySelectorAll(".advf").forEach(el=>el.hidden=e.target.value!=="yes");
+  if(e.target.closest("#qform")) qSummary();
   if(e.target.id==="cf_from"||e.target.id==="cf_to"){ S[e.target.id==="cf_from"?"calFrom":"calTo"]=e.target.value;
     if(e.target.id==="cf_from" && e.target.value && (!S.calTo || S.calTo<=e.target.value)){ const d=new Date(e.target.value); d.setDate(d.getDate()+1); S.calTo=toLocalInput(d); const to=$("#cf_to"); if(to) to.value=S.calTo; }
     const r=$("#freeres"); if(r) r.innerHTML=freeCheckHTML(); return; }
@@ -2517,6 +2677,7 @@ document.addEventListener("submit", async e=>{
   e.preventDefault();
   if(e.target.id==="bform"){ saveBooking(false); }
   else if(e.target.id==="custform"){ saveCustomerForm(); }
+  else if(e.target.id==="qform"){ saveQuick(); }
   else if(e.target.id==="cform"){
     const v=id=>($("#"+id)?.value??"").trim();
     const make=v("c_make"), plate=v("c_plate").toUpperCase().replace(/\s+/g," "), rate=v("c_rate");
@@ -2541,7 +2702,7 @@ document.addEventListener("submit", async e=>{
       support_phone:v("s_phone"), support_email:v("s_email"), grievance_email:v("s_griev"), official_upi:v("s_upi"), official_bank:v("s_bank"), address:v("s_address"), designated_location:v("s_loc"),
       non_return_hours:n("s_nonret"), unreachable_hours:n("s_unreach"), return_inspection_hours:n("s_retinsp"), emergency_repair_limit:n("s_repair"), late_interest:n("s_interest"), tracking_retention_days:n("s_track"), fast_track_limit:n("s_fast"),
       min_age:n("s_age"), min_age_premium:n("s_age2"), dl_min_months:n("s_dlm"), charges:readCharges("sc_"),
-      google_review:v("s_review"), owner_whatsapp:v("s_ownwa"), summary_email:v("s_sumemail")};
+      google_review:v("s_review"), pickup_map_link:v("s_map"), owner_whatsapp:v("s_ownwa"), summary_email:v("s_sumemail")};
     if(!(await write("settings/business",doc))) return;
     S.settings=doc; toast("Settings saved.");
   }
