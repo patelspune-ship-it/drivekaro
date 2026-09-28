@@ -70,3 +70,27 @@ customer as signer. Webhook URL for the workflow: `https://www.drivekaro.in/api/
 - Pickup / return reminders and Google review requests open WhatsApp with the message ready (free, one tap). Set the Google review link in Settings.
 - Service by km: each car has "Service every (km)" (default 10,000) and "Last service at (km)"; the odometer updates from booking pickup and return readings.
 - Revenue → "Car utilisation": days on rent vs available, revenue per rented day and profit per day.
+
+## Handover (for the next developer)
+
+The owner's plain-language guide ("DriveKaro System Handover Guide") covers accounts, renewals, settings and troubleshooting. Technical summary:
+
+| Path | What it is |
+| --- | --- |
+| `index.html`, `src/App.jsx` | Public website and old `/admin` (React) |
+| `desk.html`, `src/desk/main.js` | Booking desk (all views, agreement template v2.0, PDFs via jsPDF) |
+| `src/desk/store.js` | Document store over `desk_docs` with realtime refresh |
+| `src/desk/summary.js` | Shared maths/texts for desk and morning email (money, due now, service by km, day summary, UPI links) |
+| `src/desk/drive.js` | Google Drive KYC uploads (`drive.file` scope) |
+| `pay.html`, `src/pay.js` | Public UPI pay page |
+| `api/esign/*` | Leegality: send, webhook, status, file |
+| `api/pay-info.js` | Public: UPI ID + business name only |
+| `api/cron/daily.js` | Morning email (Vercel Cron 01:30 UTC) |
+| `supabase/*.sql` | One-time DB setup (already run in production) |
+
+- **Data:** `desk_docs(collection, id, data jsonb)`; RLS via `is_desk_owner()` (emails in `public.owners`). Collections: `bookings`, `customers` (id = 10-digit mobile), `fleet`, `expenses`, `settings/business`, `meta/invoice_counter`. Gap-free invoice numbers: RPC `desk_next_invoice(p_fy)`.
+- **Statuses:** `confirmed` (quick booking with advance) → `draft` → `ready` → `sent` → `signed` → `handed` → `returned` | `cancelled`. Datetimes are stored without a zone and mean IST (`summary.js` `parseLocal`).
+- **Env vars** (Vercel): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_GOOGLE_CLIENT_ID`; Secret: `SUPABASE_SERVICE_ROLE_KEY`, `LEEGALITY_AUTH_TOKEN`, `LEEGALITY_PRIVATE_SALT`, `RESEND_API_KEY`, `CRON_SECRET`; plain: `LEEGALITY_PROFILE_ID`, `LEEGALITY_BASE_URL`, optional `LEEGALITY_OWNER_SIGNS`, `RESEND_FROM`, `SUMMARY_EMAIL`, `SITE_URL`.
+- **Rules:** store only Aadhaar last 4 digits; no secrets in code or `VITE_` vars; the WhatsApp confirmation terms (`confirmText`) must match the agreement (`buildAgreement`) — both read the same charges.
+- **Known gaps:** the public site still uses the old `cars`/`bookings` tables for availability and enquiries (a desk booking can look free online); Supabase caps queries at 1,000 rows (add paging in `store.js` when bookings grow).
+- **Workflow:** test at 390 px width; push to `main` deploys via Vercel.
