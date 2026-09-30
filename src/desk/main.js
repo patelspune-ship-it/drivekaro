@@ -587,7 +587,7 @@ function sigParties(b, A){
 function agreementHTML(b){
   const A=buildAgreement(b);
   const val = v => v===null ? `<span class="blank miss">____________</span>` : esc(v);
-  let h = `<h2>SELF-DRIVE VEHICLE RENTAL AGREEMENT</h2><div class="sub">${esc(S.settings.legal_name)} · Agreement No. ${esc(b.id)} · Template v2.0</div>`;
+  let h = `<h2>SELF-DRIVE VEHICLE RENTAL AGREEMENT</h2><div class="sub">${esc(S.settings.legal_name)} · Agreement No. ${esc(b.id)}</div>`;
   for(const sec of A.sections){
     h += `<h4>${esc(sec.h)}</h4>`;
     for(const blk of sec.body){
@@ -610,7 +610,7 @@ function buildPdf(b, opts={}){
   const ensure = hNeed => { if(y+hNeed>BOTTOM){ doc.addPage(); y=M; } };
   const text = (t,size,style,x=M,w=CW,lh=1.45) => { doc.setFont("helvetica",style); doc.setFontSize(size); const lines=doc.splitTextToSize(pdfSafe(t),w); const step=size*0.3528*lh; for(const ln of lines){ ensure(step); doc.text(ln,x,y+step*0.8); y+=step; } };
   text("SELF-DRIVE VEHICLE RENTAL AGREEMENT",15,"bold"); y+=1;
-  text(`${s.legal_name} | Agreement No. ${b.id} | Template v2.0`,9.5,"normal"); y+=3;
+  text(`${s.legal_name} | Agreement No. ${b.id}`,9.5,"normal"); y+=3;
   for(const sec of A.sections){
     ensure(14); y+=2; doc.setDrawColor(190); doc.line(M,y,W-M,y); y+=3;
     text(sec.h.toUpperCase(),10.5,"bold"); y+=1;
@@ -1002,7 +1002,7 @@ function viewDetail(){
     <div class="paper-wrap">
       ${S.detailTab==="payments" ? viewPayments(b) : `
       <div class="paper-bar">
-        <div><div class="label">Agreement preview · v2.0</div>${(b.extensions||[]).length?`<div class="muted" style="font-size:13px">Shows the agreement as signed. Extensions are confirmed under clause 2.5 (see Extensions).</div>`:""}${missing.length?`<div class="warnline">${missing.length} thing${missing.length>1?"s":""} to fix before signing (see Next step)</div>`:softMissing(b).length?`<div class="muted" style="font-size:13px">${softMissing(b).length} optional detail${softMissing(b).length>1?"s":""} blank</div>`:`<div class="muted" style="font-size:13px">All details filled</div>`}</div>
+        <div><div class="label">Agreement preview</div>${(b.extensions||[]).length?`<div class="muted" style="font-size:13px">Shows the agreement as signed. Extensions are confirmed under clause 2.5 (see Extensions).</div>`:""}${missing.length?`<div class="warnline">${missing.length} thing${missing.length>1?"s":""} to fix before signing (see Next step)</div>`:softMissing(b).length?`<div class="muted" style="font-size:13px">${softMissing(b).length} optional detail${softMissing(b).length>1?"s":""} blank</div>`:`<div class="muted" style="font-size:13px">All details filled</div>`}</div>
         <div class="actions">${canDownload?`<button class="btn sm" data-act="pdf">Save PDF</button>`:""}<button class="btn sm" data-act="copy-agreement">Copy text</button></div>
       </div>
       <article class="paper">${agreementHTML(b)}</article>`}
@@ -2617,7 +2617,7 @@ function summaryText(b){
   return [`*${s.business_name} booking ${b.id}*`,`Name: ${b.name}`,`Car: ${car.make_model||""} (${car.plate||""})`,`Pickup: ${fmtDT(b.pickup)}`,`Drop-off: ${fmtDT(b.drop)}`,`Pickup point: ${b.location||s.designated_location}`,`Duration: ${durText(c)}`,`Rental: ${inr(c.rental)}`,...(c.delivery?[`Delivery: ${inr(c.delivery)}`]:[]),depType(b)==="cash"?`Refundable deposit: ${inr(c.deposit)}`:`Security deposit: ${depShort(b)} (returned after the trip)`,`Total before handover: ${inr(c.collected)}`,`Includes ${c.km} km. Extra ${money(b,"extra_km")}/km.`,`Please carry your original driving licence. Your rental agreement will come for Aadhaar eSign before pickup.`,...(dueNow(b,s)>0&&s.official_upi?[`Pay ${inr(dueNow(b,s))} online: ${payLinkFor(b,dueNow(b,s))}`]:[]),`Questions: ${s.support_phone}`].join("\n");
 }
 function agreementText(b){
-  const A=buildAgreement(b); const out=[`SELF-DRIVE VEHICLE RENTAL AGREEMENT`,`${S.settings.legal_name} | Agreement No. ${b.id} | Template v2.0`,""];
+  const A=buildAgreement(b); const out=[`SELF-DRIVE VEHICLE RENTAL AGREEMENT`,`${S.settings.legal_name} | Agreement No. ${b.id}`,""];
   for(const sec of A.sections){ out.push(sec.h.toUpperCase()); for(const blk of sec.body){ if(blk.t==="p") out.push(blk.text); else if(blk.t==="kv"){ if(blk.title) out.push(blk.title); blk.rows.forEach(r=>out.push(`${r[0]}: ${r[1]??"__________"}`)); } else blk.items.forEach((it,i)=>out.push(`${blk.t==="ol"?"("+String.fromCharCode(97+i)+")":"-"} ${it}`)); } if(sec.sig) sigParties(b,A).forEach(p=>out.push(`${p[0]}: ${p[1]}`)); out.push(""); }
   return out.join("\n");
 }
