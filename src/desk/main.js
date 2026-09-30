@@ -101,7 +101,7 @@ function calc(b){
   const p=new Date(b.pickup), d=new Date(b.drop);
   const hours = (isNaN(p)||isNaN(d)) ? 0 : Math.max(0,(d-p)/36e5);
   const days = hours>0 ? Math.max(1, Math.ceil(hours/24 - 1e-9)) : 0;
-  const rate=Number(b.rate)||0, dep=depCash(b), delivery=Number(b.with_delivery? ch(b,"delivery_charge"):0)||0;
+  const rate=Number(b.rate)||0, dep=depCash(b), delivery=doorstepLines(b).reduce((t,x)=>t+x.amount,0);
   const ext=b.extensions||[]; let baseDays=days, extAmt=0, rental=days*rate;
   if(ext.length){ const bh=Math.max(0,(new Date(ext[0].from)-p)/36e5); baseDays=bh>0?Math.max(1,Math.ceil(bh/24-1e-9)):0; extAmt=ext.reduce((t,x)=>t+(Number(x.amount)||0),0); rental=baseDays*rate+extAmt; }
   return {hours, days, baseDays, extAmt, rental, delivery, payable:rental+delivery, deposit:dep, collected:rental+delivery+dep, km: days*(Number(ch(b,"km_per_day"))||0)};
@@ -191,12 +191,13 @@ function buildAgreement(b){
   const s=S.settings, car=carOf(b)||{}, c=calc(b), sup=s.support_phone;
   const dep = depText(b); const cashDep = depType(b)==="cash";
   const hasAddl = !!(b.addl_name||"").trim();
+  const OPC = isOperatorCar(b), OWN = operatorOf(b);
   const T=[];
   T.push({h:"Parties", body:[
     {t:"p", text:`This Self-Drive Vehicle Rental Agreement (the "Agreement") is made on ${fmtD(b.agreement_date||b.created_at)||"________"} at Pune, Maharashtra.`},
     {t:"p", text:`BETWEEN ${s.legal_name}, a sole proprietorship of Mr. ${s.signatory||"________"}, having its place of business at ${s.address}, registered under the Maharashtra Shops and Establishments (Regulation of Employment and Conditions of Service) Act, 2017 (Registration No. ${s.shop_act||"________"}) and with Udyam (Registration No. ${s.udyam||"________"}) ("DriveKaro", which expression includes its proprietor, successors and permitted assigns), of the FIRST PART;`},
     {t:"p", text:`AND the person named as the Hirer in Schedule I (the "Hirer", which expression includes the Hirer's heirs, executors, administrators and legal representatives), of the SECOND PART. DriveKaro and the Hirer are each a "Party" and together the "Parties".`},
-    {t:"p", text:"WHEREAS: (A) DriveKaro carries on the business of leasing self-drive (without driver) motor vehicles to customers for their personal use, and is the registered owner of, or is authorised in writing by the registered owner to lease, the vehicle described in Schedule II (the \"Vehicle\"); (B) the Hirer has requested to hire the Vehicle for personal use for the Booking Period, has completed DriveKaro's identity and licence verification, and has had an opportunity to read this Agreement before signing it; and (C) DriveKaro has agreed to rent the Vehicle to the Hirer on the terms of this Agreement."},
+    {t:"p", text:(OPC ? "WHEREAS: (A) DriveKaro carries on the business of leasing self-drive (without driver) motor vehicles to customers for their personal use, and has been authorised by the registered owner of the vehicle described in Schedule II (the \"Vehicle Owner\") to lease that vehicle (the \"Vehicle\");" : "WHEREAS: (A) DriveKaro carries on the business of leasing self-drive (without driver) motor vehicles to customers for their personal use, and is the registered owner of, or is authorised in writing by the registered owner to lease, the vehicle described in Schedule II (the \"Vehicle\");")+" (B) the Hirer has requested to hire the Vehicle for personal use for the Booking Period, has completed DriveKaro's identity and licence verification, and has had an opportunity to read this Agreement before signing it; and (C) DriveKaro has agreed to rent the Vehicle to the Hirer on the terms of this Agreement."},
     {t:"p", text:"NOW, THEREFORE, THE PARTIES AGREE AS FOLLOWS:"}
   ]});
   T.push({h:"1. Definitions and Interpretation", body:[
@@ -224,7 +225,8 @@ function buildAgreement(b){
     {t:"p", text:"2.3 The Hirer shall take the same care of the Vehicle as a person of ordinary prudence would take of their own vehicle."},
     {t:"p", text:"2.4 The Booking Period starts at the Start Time whether or not the Hirer collects the Vehicle at that time, subject to the cancellation terms in clause 13."},
     {t:"p", text:"2.5 The Hirer may request an extension before the End Time. An extension is valid when DriveKaro confirms the new End Time and the extension Charges in writing, including by WhatsApp message or through its booking system, and the Hirer accepts them by reply or by paying the extension Charges. No fresh agreement or signature is needed for an extension: the End Time is then the new End Time, and every term of this Agreement, including Schedule III, the Damage Limit and the insurance, liability, tracking and dispute resolution clauses, applies to the extended Booking Period. Unless the Parties agree otherwise, extension Charges are calculated at the daily rate in Schedule III. Possession after the End Time without a confirmed extension is unauthorised and clause 12 applies."},
-    {t:"p", text:"2.6 The Vehicle is handed over and returned at the location stated in Schedule III (the \"Designated Location\"). Where DriveKaro agrees to deliver or collect the Vehicle elsewhere, the delivery charge in Schedule III applies and the Hirer's responsibility for the Vehicle starts at handover and ends at return."}
+    {t:"p", text:"2.6 The Vehicle is handed over and returned at the location stated in Schedule III (the \"Designated Location\"). Where DriveKaro agrees to deliver or collect the Vehicle elsewhere, the delivery charge in Schedule III applies and the Hirer's responsibility for the Vehicle starts at handover and ends at return."},
+    ...(OPC ? [{t:"p", text:"2.7 The Vehicle is owned by the Vehicle Owner named in Schedule II and is leased by DriveKaro with the Vehicle Owner's authority. DriveKaro is the Hirer's only counterparty under this Agreement and receives all Charges. Every right of DriveKaro under this Agreement to recover or take back the Vehicle, to be paid for damage, loss, insurance shortfall, loss of use, challans and other amounts, and to make a police complaint, may also be exercised by the Vehicle Owner, or by DriveKaro on the Vehicle Owner's behalf. The Hirer's obligations and indemnities under this Agreement extend to the Vehicle Owner."}] : [])
   ]});
   T.push({h:"3. Eligibility, Verification and Authorised Drivers", body:[
     {t:"p", text:"3.1 The Hirer represents, and shall ensure that every Additional Driver is, a person who:"},
@@ -323,7 +325,7 @@ function buildAgreement(b){
     {t:"p", text:"9.3 Towing and repair costs, and rent at the daily rental rate for the days the Vehicle is off the road, for a breakdown caused by the Hirer's misuse, including wrong fuel, running out of fuel, ignoring warning lights or driving through water, are payable by the Hirer."}
   ]});
   T.push({h:"10. Insurance and Liability for Damage or Loss", body:[
-    {t:"p", text:"10.1 DriveKaro shall keep the Vehicle covered throughout the Booking Period by a comprehensive motor insurance policy covering own damage, theft and third-party liability as required by the Motor Vehicles Act, 1988. The policy number and validity are stated in Schedule II. The Hirer shall do nothing that gives the insurer grounds to refuse a claim, and shall give true and complete information to the police, the insurer and its surveyor."},
+    {t:"p", text:(OPC ? "10.1 The Vehicle is covered by the motor insurance policy held by the Vehicle Owner, including third-party liability as required by the Motor Vehicles Act, 1988. Its details are stated in Schedule II or, where not stated there, are available from DriveKaro on request." : "10.1 DriveKaro shall keep the Vehicle covered throughout the Booking Period by a comprehensive motor insurance policy covering own damage, theft and third-party liability as required by the Motor Vehicles Act, 1988. The policy number and validity are stated in Schedule II.")+" The Hirer shall do nothing that gives the insurer grounds to refuse a claim, and shall give true and complete information to the police, the insurer and its surveyor."},
     {t:"p", text:"10.2 Claims by third parties for death, bodily injury or property damage arising from the use of the Vehicle shall be handled under that policy. The Hirer shall cooperate fully in the defence of any such claim."},
     {t:"p", text:`10.3 For damage to the Vehicle in an incident that is not an Excluded Event, the Hirer shall pay:`},
     {t:"ol", items:[
@@ -390,8 +392,8 @@ function buildAgreement(b){
   T.push({h:"14. Representations and Warranties", body:[
     {t:"p", text:"14.1 DriveKaro represents and warrants that:"},
     {t:"ol", items:[
-      "it is the registered owner of the Vehicle or is authorised in writing by the registered owner to rent it out;",
-      "at handover the Vehicle holds a valid registration certificate, insurance policy and pollution under control certificate, and DriveKaro holds every registration required by Applicable Law to carry on its business;",
+      OPC ? "it is authorised by the Vehicle Owner to rent out the Vehicle;" : "it is the registered owner of the Vehicle or is authorised in writing by the registered owner to rent it out;",
+      OPC ? "at handover the Vehicle holds a valid registration certificate and, as confirmed to DriveKaro by the Vehicle Owner, a valid insurance policy and pollution under control certificate; and DriveKaro holds every registration required by Applicable Law to carry on its business;" : "at handover the Vehicle holds a valid registration certificate, insurance policy and pollution under control certificate, and DriveKaro holds every registration required by Applicable Law to carry on its business;",
       "the Vehicle is roadworthy at handover and has been serviced in line with the manufacturer's schedule; and",
       "it knows of no legal proceeding or order that prevents it from renting the Vehicle to the Hirer."
     ]},
@@ -471,16 +473,17 @@ function buildAgreement(b){
   T.push({h:"Schedule I: Hirer and Additional Driver", body:sched1});
   T.push({h:"Schedule II: Vehicle and Handover Record", body:[
     {t:"kv", title:"Part A: Vehicle", rows:[
+      ...(OPC ? [["Vehicle Owner (registered owner)", V(OWN.owner||OWN.name)], ["Leased by", `${s.legal_name}, with the Vehicle Owner's authority`]] : []),
       ["Make and model", V(car.make_model)],
       ["Registration number", V(car.plate)],
       ["Chassis number (last 5)", V(car.chassis_last5)],
       ["Colour, year, fuel, transmission", V([car.colour,car.year,car.fuel,car.transmission].filter(Boolean).join(", "))],
       ["Seating capacity", V(car.seats)],
       ["Registration type and permit no.", V([car.reg_type, car.permit_no].filter(Boolean).join(", "))],
-      ["Insurance policy no. and insurer", V([car.insurance_no, car.insurer].filter(Boolean).join(", "))],
-      ["Insurance valid till", V(fmtD(car.insurance_till))],
-      ["Insured Declared Value", V(car.idv && inr(car.idv))],
-      ["PUC valid till", V(fmtD(car.puc_till))],
+      ["Insurance policy no. and insurer", V([car.insurance_no, car.insurer].filter(Boolean).join(", ")) || (OPC?"As per the Vehicle Owner's policy (available on request)":null)],
+      ["Insurance valid till", V(fmtD(car.insurance_till)) || (OPC?"As per the Vehicle Owner's policy":null)],
+      ["Insured Declared Value", V(car.idv && inr(car.idv)) || (OPC?"As per the Vehicle Owner's policy":null)],
+      ["PUC valid till", V(fmtD(car.puc_till)) || (OPC?"As confirmed by the Vehicle Owner":null)],
       ["FASTag fitted", V(car.fastag)]
     ]},
     {t:"kv", title:"Part B: Handover Record", rows:[
@@ -500,11 +503,13 @@ function buildAgreement(b){
       ["Start Time", V(fmtDT(b.pickup))],
       ["End Time", V(fmtDT(b.drop))],
       ["Designated Location", V(b.location || s.designated_location)],
+      ["Handover (pickup) at", V(b.pickup_mode==="delivery" ? `${pickupPlace(b)} (doorstep delivery)` : pickupPlace(b))],
+      ["Return (drop) at", V(b.drop_mode==="collection" ? `${dropPlace(b)} (doorstep collection)` : dropPlace(b))],
       ["Rental rate", V(b.rate && `${inr(b.rate)} per 24 hours`)],
       ["Duration", V(durText(c))],
       ["Hours beyond full days", V(ch(b,"part_block_rule"))],
       ["Rental Charges", V(c.days && b.rate ? inr(c.rental) : null)],
-      ...(c.delivery ? [["Delivery or collection", inr(c.delivery)]] : []),
+      ...doorstepLines(b).map(x=>[x.kind==="delivery"?"Doorstep delivery charge":x.kind==="collection"?"Doorstep collection charge":"Delivery or collection", inr(x.amount)]),
       ["GST", "Not charged (see clause 4.6)"],
       ["Security Deposit", V(dep)],
       ["Total collected before handover", V(c.days && b.rate ? inr(c.collected) : null)],
@@ -517,7 +522,6 @@ function buildAgreement(b){
       ["Fuel shortfall", `Fuel at the prevailing pump price plus ${money(b,"refuel_fee")}`],
       ["Extra cleaning", `${money(b,"cleaning_charge")}; smoke odour or pet hair ${money(b,"smoking_charge")}`],
       ["Night pickup or drop (1:00 AM to 5:00 AM)", money(b,"night_charge")],
-      ["Delivery or collection away from Designated Location", money(b,"delivery_charge")],
       ["Damage Limit (accident damage paid directly by Hirer)", `${money(b,"damage_limit")} per incident; above this, insurance claim and the Hirer pays the amount not paid by the insurer`],
       ["Rent while the Vehicle is at the workshop or seized", V(b.rate && `${inr(b.rate)} per day (the daily rental rate)`)],
       ["Lost key", money(b,"lost_key")],
@@ -691,7 +695,7 @@ function softMissing(b){
   if(t==="bike" && !String(b.dep_bike_no||"").trim()) out.push("deposit bike number");
   if(t==="document" && !b.dep_doc_type) out.push("deposit document");
   if((b.addl_name||"").trim()){ miss("addl_dl","additional driver's licence"); miss("addl_dob","additional driver's date of birth"); }
-  const car=S.fleet.find(c=>c.id===b.car_id); if(car && !car.insurance_no) out.push(`${car.plate} insurance number`);
+  const car=S.fleet.find(c=>c.id===b.car_id); if(car && !car.insurance_no && car.ownership!=="operator") out.push(`${car.plate} insurance number`);
   return out;
 }
 function softNote(b){
@@ -799,7 +803,7 @@ function invoiceText(b){
   const lines=[`Hello ${b.name}, thank you for choosing ${s.business_name}.`, ``, `*Invoice ${inv.no||"(draft)"}* · Booking ${b.id}`, `${car.make_model||""} (${car.plate||""})`, `${fmtDT(b.pickup)} to ${fmtDT(b.return_at||b.drop)}`, ``,
     `Rental: ${L.c.baseDays} day${L.c.baseDays>1?"s":""} × ${inr(b.rate)} = ${inr(L.c.rental-L.c.extAmt)}`];
   (b.extensions||[]).forEach(e=>lines.push(`Extension ${e.no} (to ${fmtDT(e.to)}): ${inr(e.amount)}`));
-  if(L.c.delivery) lines.push(`Delivery: ${inr(L.c.delivery)}`);
+  doorstepLines(b).forEach(x=>lines.push(`${x.label}: ${inr(x.amount)}`));
   L.extras.forEach(x=>lines.push(`${x.label}${x.note?` (${x.note})`:""}: ${inr(x.amount)}`));
   lines.push(`*Total: ${inr(L.total)}*`, `Paid: ${inr(L.settled)}`, L.balance>0?`*Balance due: ${inr(L.balance)}*`:L.balance<0?`Excess paid, to be refunded: ${inr(-L.balance)}`:`Paid in full`);
   if(depType(b)!=="cash") lines.push(``, `Security deposit: ${depShort(b)} (${b.dep_returned_at?"returned":"held"})`);
@@ -813,7 +817,7 @@ function invoiceModel(b){
   const ext=b.extensions||[];
   const items=[[`Vehicle rental: ${car.make_model||""} (${car.plate||""}), ${L.c.baseDays} × 24 hrs at ${inr(b.rate)}`, L.c.rental-L.c.extAmt]];
   ext.forEach(e=>items.push([`Extension ${e.no}: ${fmtDT(e.from)} to ${fmtDT(e.to)}, ${e.days} day${e.days===1?"":"s"}`, Number(e.amount)||0]));
-  if(L.c.delivery) items.push(["Delivery or collection", L.c.delivery]);
+  doorstepLines(b).forEach(x=>items.push([x.label, x.amount]));
   L.extras.forEach(x=>items.push([`${x.label}${x.note?` (${x.note})`:""}`, Number(x.amount)||0]));
   return {s, L, car, inv, items};
 }
@@ -926,6 +930,7 @@ function viewPayments(b){
       ${S.confirmSettle?`<div class="actions"><button class="btn sm primary" data-act="do-settle" data-use="${use}" data-refund="${refund}">Record it</button><button class="btn sm" data-act="cancel-settle">Not now</button></div>`:`<button class="btn sm" data-act="ask-settle">Settle deposit</button>`}</div>`:""}
   </section>
 
+  ${opCardHTML(b)}
   <section class="pcard"><div class="paper-bar" style="margin:0 0 12px">
       <div><h3 style="margin:0">Invoice</h3><div class="muted" style="font-size:13px">${b.invoice?.no?`No. ${esc(b.invoice.no)} · amounts update with new entries`:"Generate to give it a number from the DK/"+fyOf(new Date())+" series"}</div></div>
       <div class="actions">
@@ -1088,6 +1093,12 @@ function docStatus(dateStr, until){
   return {cls:"s-signed", label:"Valid", bad:false};
 }
 function carWarnings(c){
+  if(c.ownership==="operator"){
+    const w=[]; const ins=docStatus(c.insurance_till), puc=docStatus(c.puc_till);
+    if(ins.missing && !c.insurance_no) w.push("Operator car: insurance not checked"); else if(ins.bad || ins.cls==="s-sent") w.push("Insurance: "+ins.label.toLowerCase());
+    if(!puc.missing && (puc.bad || puc.cls==="s-sent")) w.push("PUC: "+puc.label.toLowerCase());
+    return w;
+  }
   const w=[];
   const ins=docStatus(c.insurance_till), puc=docStatus(c.puc_till);
   if(!c.insurance_no) w.push("Insurance policy number not added");
@@ -1118,7 +1129,7 @@ function pickGridHTML(selId, pickup, drop){
   return `<div class="pick" role="radiogroup" aria-label="Car">${cars.map(c=>{
     const clash=clashFor(c.id,pickup,drop,S.editId); const w=carWarnings(c).length;
     return `<button type="button" class="pickcard" role="radio" aria-checked="${c.id===selId}" data-pickcar="${esc(c.id)}">
-      <span class="plate">${esc(c.plate)}</span>
+      <span class="plate">${esc(c.plate)}</span>${c.ownership==="operator"?`<span class="optag">Operator · ${esc(c.operator_name||"")}</span>`:""}
       <b>${esc(c.make_model)}</b>
       <span class="muted num">${inr(c.rate)}/day · ${esc(c.category||"")}</span>
       ${clash?`<span class="pickflag bad">Booked: ${esc(clash.name)}</span>`: w?`<span class="pickflag warn">${w} thing${w>1?"s":""} to check</span>`:`<span class="pickflag ok">Ready</span>`}
@@ -1150,6 +1161,7 @@ function pickCar(id){
   const r=$("#f_rate"), d=$("#f_deposit");
   if(r && (!r.value || r.dataset.auto)){ r.value=car.rate||""; r.dataset.auto="1"; }
   if(d && (!d.value || d.dataset.auto)){ d.value=car.deposit??""; d.dataset.auto="1"; }
+  if(car.ownership==="operator") for(const pf of ["f_","q_"]){ const sel=$("#"+pf+"triptype"); if(sel){ sel.value="OPERATOR"; const f=document.querySelector(`.opf[data-for="${pf}triptype"]`); if(f) f.hidden=false; const inp=$("#"+pf+"operator"); if(inp && !inp.value) inp.value=car.operator_name||""; } }
   refreshCarOptions(); updateSummary(); qSummary();
 }
 
@@ -1183,9 +1195,9 @@ function viewForm(errs={}){
         ${fieldHTML("f_pickup","Pickup",g("pickup"),{type:"datetime-local",req:1,err:errs.pickup})}
         ${fieldHTML("f_drop","Drop-off",g("drop"),{type:"datetime-local",req:1,err:errs.drop})}
         <div class="field wide"><div id="durline" class="durline"></div></div>
-        ${fieldHTML("f_location","Handover and return location",g("location")||S.settings.designated_location,{wide:1})}
+        ${fieldHTML("f_location","DriveKaro pickup point",g("location")||S.settings.designated_location,{wide:1,hint:"Used when the customer comes to you."})}
         ${tripFieldsHTML("f_", b)}
-        ${selectHTML("f_delivery","Delivery or collection",b.with_delivery?"yes":"no",[["no","No, customer comes to us"],["yes","Yes, add delivery charge"]])}
+        ${doorstepFieldsHTML("f_", b)}
       </div></fieldset>
       <fieldset><legend>3 · Price and charges ${sub("(for this booking only)")}</legend>
         <div class="grid">
@@ -1269,7 +1281,7 @@ function readForm(){
   const o={}; for(const k in FORM_MAP){ o[k]=($("#"+FORM_MAP[k])?.value??"").trim(); }
   o.dl=o.dl.toUpperCase(); o.addl_dl=o.addl_dl.toUpperCase(); o.dep_bike_no=o.dep_bike_no.toUpperCase();
   if(o.deposit_type!=="cash") o.deposit="";
-  o.with_delivery = $("#f_delivery")?.value==="yes";
+  Object.assign(o, readDoorstep("f_"));
   o.charges = readCharges("fc_");
   return o;
 }
@@ -1307,7 +1319,7 @@ function viewFleet(){
 function carCard(c){
   const w=carWarnings(c), now=carNow(c);
   return `<button class="car" data-carview="${esc(c.id)}">
-    <span class="top-line"><span class="plate">${esc(c.plate)}</span>${c.example?'<span class="ex">Example</span>':""}</span>
+    <span class="top-line"><span class="plate">${esc(c.plate)}</span>${c.ownership==="operator"?`<span class="optag">Operator · ${esc(c.operator_name||"")}</span>`:""}${c.example?'<span class="ex">Example</span>':""}</span>
     <span><b class="car-name">${esc(c.make_model)}</b><span class="meta">${esc([c.category,c.reg_type,c.fuel,c.transmission].filter(Boolean).join(" · "))}</span></span>
     <span class="rate num">${inr(c.rate)} <small>/ day · deposit ${inr(c.deposit)}</small></span>
     <span class="pill ${now.cls}" style="align-self:flex-start">${esc(now.label)}</span>
@@ -1356,7 +1368,7 @@ function viewCarProfile(c){
         ${row("Year", esc(c.year||"—"))}
         ${row("Available for booking", c.active===false?"No":"Yes")}
       </dl></div>
-      ${serviceCardHTML(c)}
+      ${c.ownership==="operator"?`<div class="card"><h3>Operator</h3><dl class="kv-grid"><div><dt>Operator</dt><dd>${esc(c.operator_name||"—")}</dd></div><div><dt>Mobile</dt><dd>${esc(c.operator_phone||"—")}</dd></div><div><dt>Registered owner</dt><dd>${esc(c.owner_name||c.operator_name||"—")}</dd></div></dl>${c.operator_phone&&waHref(c.operator_phone,"x")?`<div class="actions" style="margin-top:10px"><a class="btn sm wa" href="${esc(waHref(c.operator_phone,`Hello ${c.operator_name||""}, `))}" target="_blank" rel="noopener">WhatsApp operator</a></div>`:""}</div>`:serviceCardHTML(c)}
       <div class="card"><h3>Usage</h3><dl class="kv-grid num">
         ${row("Trips completed or running", String(done.length))}
         ${row("Days rented", String(days))}
@@ -1376,6 +1388,13 @@ function viewCarForm(){
   return `
   <div class="head-row"><h2>${S.carEdit==="new"?"Add car":"Edit "+esc(c.plate)}</h2><button class="btn sm" data-act="close-car">Back to fleet</button></div>
   <form id="cform" novalidate>
+    <fieldset><legend>Ownership</legend><div class="grid">
+      ${selectHTML("c_own","Whose car",g("ownership")||"own",[["own","Our own car"],["operator","Operator's car (commission)"]])}
+      <div class="field opcar" ${c.ownership==="operator"?"":"hidden"}><label for="c_opname">Operator name <em>*</em></label><input id="c_opname" value="${esc(g("operator_name"))}"></div>
+      <div class="field opcar" ${c.ownership==="operator"?"":"hidden"}><label for="c_opphone">Operator mobile</label><input id="c_opphone" type="tel" inputmode="tel" value="${esc(g("operator_phone"))}"></div>
+      <div class="field opcar" ${c.ownership==="operator"?"":"hidden"}><label for="c_ownername">Registered owner (as on RC)</label><input id="c_ownername" value="${esc(g("owner_name"))}"><span class="hint">Printed on the agreement as the Vehicle Owner. Blank = operator name.</span></div>
+    </div>
+    <p class="note opcar" style="margin:12px 0 0" ${c.ownership==="operator"?"":"hidden"}>For operator cars, fill whatever papers you know. Blank insurance and PUC print as "as per the Vehicle Owner's policy" on the agreement. The customer sees no commission.</p></fieldset>
     <fieldset><legend>Car</legend><div class="grid">
       ${fieldHTML("c_make","Make and model",g("make_model"),{req:1,attrs:'placeholder="Hyundai Creta SX"'})}
       ${fieldHTML("c_plate","Registration number",g("plate"),{req:1,attrs:'placeholder="MH12 AB 1234" style="text-transform:uppercase"'})}
@@ -1782,7 +1801,7 @@ function showDepFields(){ const t=$("#f_deptype")?.value||"cash"; document.query
 function advanceOf(b){ return (b.payments||[]).filter(p=>p.advance).reduce((t,p)=>t+(Number(p.amount)||0),0); }
 function payLabel(p){ return p.advance ? "Advance received" : PAY_KINDS[p.kind]; }
 function carSnapshot(car){
-  return car ? {make_model:car.make_model, plate:car.plate, colour:car.colour||"", year:car.year||"", fuel:car.fuel||"", transmission:car.transmission||"", category:car.category||"", seats:car.seats||"", chassis_last5:car.chassis_last5||"", reg_type:car.reg_type||"", permit_no:car.permit_no||"", insurance_no:car.insurance_no||"", insurer:car.insurer||"", insurance_till:car.insurance_till||"", idv:car.idv||"", puc_till:car.puc_till||"", fastag:car.fastag||""} : null;
+  return car ? {make_model:car.make_model, plate:car.plate, colour:car.colour||"", year:car.year||"", fuel:car.fuel||"", transmission:car.transmission||"", category:car.category||"", seats:car.seats||"", chassis_last5:car.chassis_last5||"", reg_type:car.reg_type||"", permit_no:car.permit_no||"", insurance_no:car.insurance_no||"", insurer:car.insurer||"", insurance_till:car.insurance_till||"", idv:car.idv||"", puc_till:car.puc_till||"", fastag:car.fastag||"", ownership:car.ownership||"own", operator_name:car.operator_name||"", operator_phone:car.operator_phone||"", owner_name:car.owner_name||""} : null;
 }
 function isNightTime(s){ const d=new Date(s); if(isNaN(d)) return false; const h=d.getHours(); return h>=1 && h<5; }
 // The customer's booking confirmation, in DriveKaro's own format.
@@ -1802,12 +1821,13 @@ function confirmText(b){
     `Pickup Date & Time: ${fmtDT(b.pickup)}`,
     `Drop Date & Time: ${fmtDT(b.drop)}`,
     `Rent: ${inr(c.rental)} (${c.days} day${c.days===1?"":"s"})`,
-    c.delivery?`Delivery: ${inr(c.delivery)}`:null,
+    ...doorstepLines(b).map(x=>`${x.kind==="delivery"?"Doorstep Delivery":x.kind==="collection"?"Doorstep Collection":"Delivery"}: ${inr(x.amount)}`),
     dep?`Security Deposit: ${inr(dep)} (refundable after return)`:depType(b)!=="cash"?`Security Deposit: ${depShort(b)} (returned after the trip)`:null,
     `Advance Paid: ${inr(adv)}`,
     `Balance Amount: ${inr(due)} (payable at pickup)`,
     link?`Pay online: ${link}`:null,
-    `Car Pickup Location: ${where}`, ``,
+    `Car Pickup Location: ${b.pickup_mode==="delivery" ? `${b.pickup_address||"your address"} (we deliver the car)` : where}`,
+    `Car Drop Location: ${b.drop_mode==="collection" ? `${b.drop_address||"your address"} (we collect the car)` : b.pickup_mode==="delivery" ? where : "Same as pickup location"}`, ``,
     `*Terms & Conditions:*`, ``,
     `• The daily usage limit is ${lim} km. Any usage beyond this limit will be charged at ${inr(ch(b,"extra_km"))} per km.${tol?` Up to ${tol} km over the limit is not charged.`:""}`,
     `• The vehicle must be returned with the same fuel level as provided at pickup. Any extra fuel will not be refunded or adjusted in the rental amount.`,
@@ -1825,13 +1845,13 @@ function confirmText(b){
   return lines.filter(l=>l!==null).join("\n");
 }
 function quickTotals(q){
-  const b={pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, deposit_type:"cash"};
+  const b={pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, deposit_type:"cash", pickup_mode:q.pickup_mode, pickup_charge:q.pickup_charge, drop_mode:q.drop_mode, drop_charge:q.drop_charge};
   const c=calc(b); const adv=q.adv==="yes"?(Number(q.adv_amt)||0):0;
-  return {c, adv, total:c.rental+c.deposit, balance:Math.max(0,c.rental+c.deposit-adv)};
+  return {c, adv, total:c.rental+c.delivery+c.deposit, balance:Math.max(0,c.rental+c.delivery+c.deposit-adv)};
 }
 function readQuick(){
   const v=id=>($("#"+id)?.value??"").trim();
-  return {phone:v("q_phone"), name:v("q_name"), car_id:v("f_car"), pickup:v("f_pickup"), drop:v("f_drop"), rate:v("f_rate"), deposit:v("f_deposit"), adv:v("q_adv"), adv_amt:v("q_advamt"), adv_mode:v("q_advmode"), adv_ref:v("q_advref"), trip_to:v("q_tripto"), trip_type:v("q_triptype")||"SELF", operator_name:v("q_triptype")==="OPERATOR"?v("q_operator"):""};
+  return {phone:v("q_phone"), name:v("q_name"), car_id:v("f_car"), pickup:v("f_pickup"), drop:v("f_drop"), rate:v("f_rate"), deposit:v("f_deposit"), adv:v("q_adv"), adv_amt:v("q_advamt"), adv_mode:v("q_advmode"), adv_ref:v("q_advref"), trip_to:v("q_tripto"), trip_type:v("q_triptype")||"SELF", operator_name:v("q_triptype")==="OPERATOR"?v("q_operator"):"", ...readDoorstep("q_")};
 }
 function viewQuick(errs={}){
   const q=S.quick||{adv:"yes", adv_mode:"UPI"}; const g=k=>q[k]??"";
@@ -1852,6 +1872,7 @@ function viewQuick(errs={}){
     <input type="hidden" id="f_car" value="${esc(g("car_id"))}">
     <div id="carpick" style="margin-top:12px">${pickGridHTML(g("car_id"), g("pickup"), g("drop"))}</div>
     ${errs.car?`<div class="err" style="margin-top:6px">${esc(errs.car)}</div>`:""}</fieldset>
+    <fieldset><legend>Pickup and drop</legend><div class="grid">${doorstepFieldsHTML("q_", q)}</div></fieldset>
     <fieldset><legend>Amount</legend><div class="grid">
       ${fieldHTML("f_rate","Rent per day (₹)",g("rate"),{type:"number",req:1,err:errs.rate,attrs:'min="0" inputmode="numeric"'})}
       ${fieldHTML("f_deposit","Security deposit (₹)",g("deposit"),{type:"number",attrs:'min="0" inputmode="numeric"',hint:"Refundable. Change the type later if you take a bike or document."})}
@@ -1872,6 +1893,7 @@ function qSummary(){
   const night=[isNightTime(q.pickup)&&"pickup", isNightTime(q.drop)&&"drop"].filter(Boolean);
   box.innerHTML=`<dl class="kv num">
     <dt>Rent</dt><dd>${c.days} day${c.days===1?"":"s"} × ${inr(q.rate)} = ${inr(c.rental)}</dd>
+    ${c.delivery?`<dt>Pickup / drop charges</dt><dd>${inr(c.delivery)}</dd>`:""}
     <dt>Security deposit</dt><dd>${inr(c.deposit)}</dd>
     <dt>Advance paid</dt><dd>− ${inr(T.adv)}</dd>
     <dt class="total">Balance at pickup</dt><dd class="total">${inr(T.balance)}</dd>
@@ -1900,7 +1922,8 @@ async function saveQuick(){
   const car=S.fleet.find(c=>c.id===q.car_id); const id=newId(); const now=new Date().toISOString();
   const kyc={}; if(existing) for(const k of KYC_FIELDS) if(existing[k]) kyc[k]=existing[k];
   const doc={...kyc, id, status:"confirmed", name:q.name||existing?.name||"", phone:fmtPhone(q.phone), customer_id:cust?.id||"",
-    car_id:q.car_id, car_snapshot:carSnapshot(car), trip_to:q.trip_to, trip_type:q.trip_type, operator_name:q.operator_name, pickup:q.pickup, drop:q.drop, rate:Number(q.rate), deposit:Number(q.deposit)||0, deposit_type:"cash",
+    car_id:q.car_id, car_snapshot:carSnapshot(car), trip_to:q.trip_to, trip_type:car?.ownership==="operator"?"OPERATOR":q.trip_type, operator_name:car?.ownership==="operator"?(q.operator_name||car.operator_name||""):q.operator_name,
+    pickup_mode:q.pickup_mode, pickup_address:q.pickup_address, pickup_charge:q.pickup_charge, drop_mode:q.drop_mode, drop_address:q.drop_address, drop_charge:q.drop_charge, pickup:q.pickup, drop:q.drop, rate:Number(q.rate), deposit:Number(q.deposit)||0, deposit_type:"cash",
     charges:defaultCharges(), payments: q.adv==="yes" ? [{id:"p"+Date.now().toString(36), kind:"payment", advance:true, amount:Number(q.adv_amt), mode:q.adv_mode||"UPI", ref:q.adv_ref, at:toLocalInput()}] : [],
     created_at:now, updated_at:now, confirmed_at:now, agreement_date:toLocalInput().slice(0,10), template_version:"2.0", quick:true};
   if(!(await write("bookings/"+id, doc))) return;
@@ -1938,37 +1961,130 @@ async function exportTripsXlsx(){
   const title=`DriveKaro Trips ( ${R.rangeLabel} )`;
   const used=new Set();
   const sheetName=(c)=>{ let n=String(c.plate||c.make_model||"Car").replace(/[\\/?*[\]:]/g," ").trim().slice(0,31)||"Car"; let k=n, i=2; while(used.has(k.toLowerCase())){ k=`${n.slice(0,28)} ${i++}`; } used.add(k.toLowerCase()); return k; };
-  const summary=[[{value:title, fontWeight:"bold"}],[],[H("Car"),H("Plate"),H("Trips"),H("Trip days"),H("AMOUNT EARNED"),H("Received"),H("Balance due"),H("Expenses"),H("Profit")]];
+  const summary=[[{value:title, fontWeight:"bold"}],[],[H("Car"),H("Plate"),H("Trips"),H("Trip days"),H("AMOUNT EARNED"),H("Received"),H("Balance due"),H("Your income"),H("Expenses"),H("Profit")]];
   const carSheets=[]; const T={n:0,days:0,amt:0,rec:0,bal:0,exp:0};
   for(const id of carIds){
     const c=carInfo(id); const list=trips.filter(b=>b.car_id===id);
     if(!list.length && S.repCar==="all" && !S.fleet.some(x=>x.id===id && x.active!==false)) continue;
     const rows=[[{value:`${title} · ${c.make_model||""} ${c.plate||""}`.trim(), fontWeight:"bold"}],[],
-      [H("DATE OF TRIP"),H("Customer Name"),H("Trip To"),H("AMOUNT EARNED"),H("Trip Type"),H("TRIP DAYS"),H("Return date"),H("Mobile"),H("Received"),H("Balance"),H("Booking ID")]];
-    let amt=0, days=0, rec=0, bal=0;
+      [H("DATE OF TRIP"),H("Customer Name"),H("Trip To"),H("AMOUNT EARNED"),H("Trip Type"),H("TRIP DAYS"),H("Return date"),H("Mobile"),H("Received"),H("Balance"),H("Booking ID"),H("Your commission"),H("Payable to operator"),H("Paid to operator")]];
+    let amt=0, days=0, rec=0, bal=0, inc=0, com=0, pay=0, paid=0;
     for(const b of list){
       const L=ledger(b); const dl=tripDaysLabel(b);
-      amt+=L.total; days+=L.c.days; rec+=L.settled; bal+=Math.max(0,L.balance);
-      rows.push([D(b.pickup), {value:b.name||""}, {value:b.trip_to||null}, N(L.total), {value:tripTypeLabel(b)}, typeof dl==="number"?N(dl):{value:dl}, D(b.status==="returned"&&b.return_at?b.return_at:b.drop), {value:b.phone||""}, N(L.settled), N(Math.max(0,L.balance)), {value:b.id}]);
+      amt+=L.total; days+=L.c.days; rec+=L.settled; bal+=Math.max(0,L.balance); inc+=earnedOf(b);
+      const op=isOperatorCar(b), f=op?opFigures(b):null; if(op){ com+=f.com||0; pay+=f.payable||0; paid+=f.paid; }
+      rows.push([D(b.pickup), {value:b.name||""}, {value:b.trip_to||null}, N(L.total), {value:tripTypeLabel(b)}, typeof dl==="number"?N(dl):{value:dl}, D(b.status==="returned"&&b.return_at?b.return_at:b.drop), {value:b.phone||""}, N(L.settled), N(Math.max(0,L.balance)), {value:b.id}, op?(f.com==null?{value:"not entered"}:N(f.com)):null, op&&f.payable!=null?N(f.payable):null, op?N(f.paid):null]);
     }
     if(!list.length) rows.push([{value:"No trips in this period"}]);
     rows.push([]);
-    rows.push([{value:"TOTAL", fontWeight:"bold"}, {value:`${list.length} trip${list.length===1?"":"s"}`}, null, N(amt,true), null, N(days,true), null, null, N(rec,true), N(bal,true), null]);
+    rows.push([{value:"TOTAL", fontWeight:"bold"}, {value:`${list.length} trip${list.length===1?"":"s"}`}, null, N(amt,true), null, N(days,true), null, null, N(rec,true), N(bal,true), null, com?N(com,true):null, pay?N(pay,true):null, paid?N(paid,true):null]);
     const x=expTotal(expFor(id),test);
+    if(inc!==amt) rows.push([{value:"Your income"}, null, null, N(inc)]);
     rows.push([{value:"Expenses"}, null, null, N(x)]);
-    rows.push([{value:"PROFIT", fontWeight:"bold"}, null, null, N(amt-x,true)]);
-    carSheets.push({data:rows, sheet:sheetName(c), columns:[{width:14},{width:24},{width:26},{width:16},{width:12},{width:11},{width:13},{width:14},{width:12},{width:12},{width:18}]});
-    summary.push([{value:c.make_model||""},{value:c.plate||""},N(list.length),N(days),N(amt),N(rec),N(bal),N(x),N(amt-x)]);
-    T.n+=list.length; T.days+=days; T.amt+=amt; T.rec+=rec; T.bal+=bal; T.exp+=x;
+    rows.push([{value:"PROFIT", fontWeight:"bold"}, null, null, N(inc-x,true)]);
+    carSheets.push({data:rows, sheet:sheetName(c), columns:[{width:14},{width:24},{width:26},{width:16},{width:22},{width:11},{width:13},{width:14},{width:12},{width:12},{width:18},{width:15},{width:18},{width:16}]});
+    summary.push([{value:`${c.make_model||""}${c.ownership==="operator"?` (operator: ${c.operator_name||""})`:""}`},{value:c.plate||""},N(list.length),N(days),N(amt),N(rec),N(bal),N(inc),N(x),N(inc-x)]);
+    T.n+=list.length; T.days+=days; T.amt+=amt; T.rec+=rec; T.bal+=bal; T.exp+=x; T.inc=(T.inc||0)+inc;
   }
   const gen=(!S.repCar||S.repCar==="all") ? expTotal((S.expenses||[]).filter(e=>!e.car_id),test) : 0;
-  if(gen){ summary.push([{value:"Business (not one car)"},null,null,null,null,null,null,N(gen),N(-gen)]); T.exp+=gen; }
+  if(gen){ summary.push([{value:"Business (not one car)"},null,null,null,null,null,null,null,N(gen),N(-gen)]); T.exp+=gen; }
   summary.push([]);
-  summary.push([{value:"TOTAL", fontWeight:"bold"},null,N(T.n,true),N(T.days,true),N(T.amt,true),N(T.rec,true),N(T.bal,true),N(T.exp,true),N(T.amt-T.exp,true)]);
-  const sheets=[{data:summary, sheet:"Summary", columns:[{width:24},{width:15},{width:8},{width:10},{width:16},{width:13},{width:13},{width:12},{width:13}]}, ...carSheets];
+  summary.push([{value:"TOTAL", fontWeight:"bold"},null,N(T.n,true),N(T.days,true),N(T.amt,true),N(T.rec,true),N(T.bal,true),N(T.inc||0,true),N(T.exp,true),N((T.inc||0)-T.exp,true)]);
+  const sheets=[{data:summary, sheet:"Summary", columns:[{width:34},{width:15},{width:8},{width:10},{width:16},{width:13},{width:13},{width:13},{width:12},{width:13}]}, ...carSheets];
   const blob=await writeExcelFile(sheets).toBlob();
   const who = R.car ? (R.car.plate||"car").replace(/\s+/g,"") : "All-cars";
   return {filename:`DriveKaro-Trips-${who}-${R.rangeLabel.replace(/\s+/g,"-")}.xlsx`, blob:new Blob([blob],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})};
+}
+
+/* ---------- operator cars (commission) ---------- */
+function isOperatorCar(b){ return (carOf(b)||{}).ownership==="operator"; }
+function operatorOf(b){ const c=carOf(b)||{}; return {name:b.operator_name||c.operator_name||"", phone:c.operator_phone||"", owner:c.owner_name||c.operator_name||""}; }
+function opFigures(b){
+  const L=ledger(b); const base=Math.max(0, L.total-L.c.delivery);
+  const com=(b.commission===""||b.commission==null) ? null : (Number(b.commission)||0);
+  const payable=com==null ? null : Math.max(0, base-com);
+  const paid=(b.op_payouts||[]).reduce((t,p)=>t+(Number(p.amount)||0),0);
+  return {L, base, com, payable, paid, pending: payable==null ? null : payable-paid};
+}
+// Your own income from a booking: full invoice for own cars; commission + pickup/drop charges for operator cars.
+function earnedOf(b){ const L=ledger(b); if(!isOperatorCar(b)) return L.total; return (opFigures(b).com||0) + L.c.delivery; }
+function opTripText(b){
+  const o=operatorOf(b), car=carOf(b)||{}, f=opFigures(b);
+  return [`Hello ${o.name||""}, booking for your car ${car.make_model||""} (${car.plate||""}) through ${S.settings.business_name}:`, ``,
+    `Customer: ${b.name||""}`, `Pickup: ${fmtDT(b.pickup)} at ${pickupPlace(b)}`, `Drop: ${fmtDT(b.drop)} at ${dropPlace(b)}`, b.trip_to?`Trip to: ${b.trip_to}`:null,
+    f.payable!=null?``:null, f.payable!=null?`Amount payable to you: ${inr(f.payable)}${f.paid?` (paid so far ${inr(f.paid)})`:""}`:null,
+    ``, `${S.settings.business_name} · ${S.settings.support_phone}`].filter(l=>l!==null).join("\n");
+}
+function opCardHTML(b){
+  if(!isOperatorCar(b)) return "";
+  const o=operatorOf(b), f=opFigures(b), pays=(b.op_payouts||[]);
+  return `<details class="pcard opcard" ${S.opOpen===b.id?"open":""}><summary data-opsum="${esc(b.id)}"><h3 style="display:inline">Operator settlement</h3> <span class="pill s-draft">Private · tap to open</span>${f.pending>0?` <span class="pill s-sent">${inr(f.pending)} to pay</span>`:f.com==null?` <span class="pill s-sent">commission not entered</span>`:""}</summary>
+    <p class="muted" style="margin:-4px 0 10px;font-size:13px">Car of <b>${esc(o.name||"operator")}</b>${o.phone?` · ${esc(o.phone)}`:""}. Never shown to the customer.</p>
+    <dl class="kv num">
+      <dt>Collected for the trip</dt><dd>${inr(f.base)}</dd>
+      <dt>Your commission</dt><dd>${f.com==null?`<span class="warnline">not entered</span>`:inr(f.com)}</dd>
+      <dt class="total">Payable to operator</dt><dd class="total">${f.payable==null?"—":inr(f.payable)}</dd>
+      <dt>Paid to operator</dt><dd>${inr(f.paid)}</dd>
+      <dt>Still to pay</dt><dd class="${f.pending>0?"err":""}">${f.pending==null?"—":inr(f.pending)}</dd>
+    </dl>
+    <p class="muted" style="margin:6px 0 0;font-size:12.5px">Collected = rent + extra charges${f.L.c.delivery?`. Pickup/drop charges (${inr(f.L.c.delivery)}) stay with you`:""}. Deposit is not included.</p>
+    <div class="grid" style="margin-top:12px">
+      ${fieldHTML("o_com","Your commission (₹)",b.commission??"",{type:"number",attrs:'min="0" inputmode="numeric"',hint:"Leave blank until you know it."})}
+    </div>
+    <div class="actions" style="margin-top:8px"><button class="btn sm primary" data-act="op-save-com">Save commission</button>${o.phone&&waHref(o.phone,"x")?`<a class="btn sm wa" href="${esc(waHref(o.phone,opTripText(b)))}" target="_blank" rel="noopener">Send trip details to operator</a>`:""}</div>
+    <h4 style="margin:16px 0 8px;font-size:14px">Record payment to operator</h4>
+    <div class="grid">
+      ${fieldHTML("o_amt","Amount (₹)",f.pending>0?f.pending:"",{type:"number",attrs:'min="1" inputmode="numeric"'})}
+      ${selectHTML("o_mode","Mode","UPI",PAYMODES.map(m=>[m,m]))}
+      ${fieldHTML("o_ref","Reference","")}
+      ${fieldHTML("o_at","Date and time",toLocalInput(),{type:"datetime-local"})}
+    </div>
+    <div class="actions" style="margin-top:8px"><button class="btn sm" data-act="op-pay">Add payment to operator</button></div>
+    ${pays.length?`<div class="tablewrap"><table class="ptable num"><tbody>${pays.map(p=>`<tr><td>${esc(fmtDT(p.at))}</td><td>${esc(p.mode||"")}${p.ref?`<br><small class="muted">${esc(p.ref)}</small>`:""}</td><td style="text-align:right">${inr(p.amount)}</td><td class="rowact"><button class="btn sm" data-act="op-del-pay" data-id="${esc(p.id)}">Remove</button></td></tr>`).join("")}</tbody></table></div>`:""}
+  </details>`;
+}
+function operatorsHTML(R){
+  const inRange = R.range==="month" ? b=>ym(b.pickup)===R.month : R.range==="fy" ? R.inFY : ()=>true;
+  const list=S.bookings.filter(b=>EARNED.includes(b.status) && isOperatorCar(b) && inRange(b) && (!S.repCar||S.repCar==="all"||b.car_id===S.repCar));
+  if(!list.length) return "";
+  const G=new Map();
+  for(const b of list){ const k=operatorOf(b).name||"Operator"; const f=opFigures(b); const g=G.get(k)||{n:0,col:0,com:0,pend:0,missing:0}; g.n++; g.col+=f.base; g.com+=f.com||0; g.pend+=Math.max(0,f.pending||0); if(f.com==null) g.missing++; G.set(k,g); }
+  const rows=[...G.entries()].sort((a,b)=>b[1].col-a[1].col);
+  return `<section class="pcard" style="margin-top:14px"><h3>Operator cars · ${esc(R.rangeLabel)}</h3>
+    <div class="mtable m4">
+      <div class="mrow mhead"><span>Operator</span><span class="r">Collected</span><span class="r">Your commission</span><span class="r">Still to pay</span></div>
+      ${rows.map(([k,g])=>`<div class="mrow"><span>${esc(k)}<small class="muted">${g.n} trip${g.n===1?"":"s"}${g.missing?` · <span class="warnline">${g.missing} without commission</span>`:""}</small></span><span class="r num">${inr(g.col)}</span><span class="r num b">${inr(g.com)}</span><span class="r num ${g.pend>0?"neg":""}">${g.pend?inr(g.pend):"–"}</span></div>`).join("")}
+    </div>
+    <p class="muted" style="margin:10px 0 0;font-size:12.5px">Only your commission (plus pickup/drop charges) counts as revenue for operator cars.</p>
+  </section>`;
+}
+
+/* ---------- doorstep pickup and drop ---------- */
+function doorstepLines(b){
+  const out=[];
+  if(b.pickup_mode==="delivery") out.push({kind:"delivery", label:`Doorstep delivery${b.pickup_address?` to ${b.pickup_address}`:""}`, amount:Number(b.pickup_charge)||0});
+  if(b.drop_mode==="collection") out.push({kind:"collection", label:`Doorstep collection${b.drop_address?` from ${b.drop_address}`:""}`, amount:Number(b.drop_charge)||0});
+  if(!b.pickup_mode && !b.drop_mode && b.with_delivery) out.push({kind:"legacy", label:"Delivery or collection", amount:Number(ch(b,"delivery_charge"))||0});
+  return out;
+}
+function pickupPlace(b){ return b.pickup_mode==="delivery" ? (b.pickup_address||"Hirer's address") : (b.location||S.settings.designated_location); }
+function dropPlace(b){ return b.drop_mode==="collection" ? (b.drop_address||"Hirer's address") : (b.location||S.settings.designated_location); }
+function doorstepFieldsHTML(prefix, b){
+  const d=Number(defaultCharges().delivery_charge)||"";
+  const pu=b.pickup_mode||(b.with_delivery?"delivery":"office"), dr=b.drop_mode||"office";
+  const val=(v,def)=>v===undefined||v===null ? def : v;
+  return `${selectHTML(prefix+"pumode","Pickup",pu,[["office","Customer comes to DriveKaro"],["delivery","We deliver the car"]])}
+    <div class="field dsf" data-for="${prefix}pumode" ${pu==="delivery"?"":"hidden"}><label for="${prefix}puaddr">Delivery address</label><input id="${prefix}puaddr" value="${esc(b.pickup_address||"")}" placeholder="Address or landmark"></div>
+    <div class="field dsf" data-for="${prefix}pumode" ${pu==="delivery"?"":"hidden"}><label for="${prefix}pucharge">Delivery charge (₹)</label><input id="${prefix}pucharge" type="number" min="0" inputmode="numeric" value="${esc(val(b.pickup_charge, b.with_delivery?ch(b,"delivery_charge"):d))}"></div>
+    ${selectHTML(prefix+"drmode","Drop",dr,[["office","Customer returns to DriveKaro"],["collection","We collect the car"]])}
+    <div class="field dsf" data-for="${prefix}drmode" ${dr==="collection"?"":"hidden"}><label for="${prefix}draddr">Collection address</label><input id="${prefix}draddr" value="${esc(b.drop_address||"")}" placeholder="Address or landmark"></div>
+    <div class="field dsf" data-for="${prefix}drmode" ${dr==="collection"?"":"hidden"}><label for="${prefix}drcharge">Collection charge (₹)</label><input id="${prefix}drcharge" type="number" min="0" inputmode="numeric" value="${esc(val(b.drop_charge, d))}"></div>`;
+}
+function readDoorstep(prefix){
+  const v=id=>($("#"+prefix+id)?.value??"").trim();
+  const pm=v("pumode")||"office", dm=v("drmode")||"office";
+  return {pickup_mode:pm, pickup_address:pm==="delivery"?v("puaddr"):"", pickup_charge:pm==="delivery"?v("pucharge"):"",
+    drop_mode:dm, drop_address:dm==="collection"?v("draddr"):"", drop_charge:dm==="collection"?v("drcharge"):"", with_delivery:false};
 }
 
 /* ---------- UPI payments ---------- */
@@ -2049,6 +2165,7 @@ function todayHTML(){
   T.pickupsTomorrow.forEach(b=>rows.push({tone:"", title:`Tomorrow ${fmtTime(b.pickup)} · ${b.name}`, sub:`${car(b)}${b.status!=="signed"?" · agreement not signed yet":""}`, act:remindBtn("pickup",b,"Remind")+open(b)}));
   T.returnsTomorrow.forEach(b=>rows.push({tone:"", title:`Tomorrow ${fmtTime(b.drop)} return · ${b.name}`, sub:car(b), act:remindBtn("return",b,"Remind")+open(b)}));
   T.toCollect.forEach(x=>rows.push({tone:x.amount<0?"":"warn", title:x.amount<0?`Settle deposit ${inr(-x.amount)} · ${x.b.name}`:`${inr(x.amount)} to collect · ${x.b.name}`, sub:`${car(x.b)} · ${x.why}`, act:`<button class="btn sm" data-open="${esc(x.b.id)}" data-tab="payments">Payments</button>`}));
+  (T.operatorPay||[]).forEach(x=>rows.push({tone:"warn", title:x.amount==null?`Enter commission · ${x.b.name}`:`Pay operator ${inr(x.amount)} · ${x.operator}`, sub:`${car(x.b)} · ${x.b.name}`, act:`<button class="btn sm" data-open="${esc(x.b.id)}" data-tab="payments">Payments</button>`}));
   T.papers.forEach(p=>rows.push({tone:p.bad?"bad":"warn", title:`${p.car.plate} · ${p.label}`, sub:p.car.make_model||"", act:`<button class="btn sm" data-carview="${esc(p.car.id)}">Car</button>`}));
   T.service.forEach(x=>rows.push({tone:x.st.state==="due"?"bad":"warn", title:`${x.car.plate} · ${x.label}`, sub:`${x.car.make_model||""} · odometer ${x.st.current.toLocaleString("en-IN")} km`, act:`<button class="btn sm" data-carview="${esc(x.car.id)}">Car</button>`}));
   T.reviews.forEach(b=>rows.push({tone:"", title:`Ask ${b.name} for a Google review`, sub:`${car(b)} · returned`, act:remindBtn("review",b,"Ask")+`<button class="btn sm" data-act="review-skip" data-id="${esc(b.id)}">Skip</button>`}));
@@ -2099,7 +2216,7 @@ function utilRows(R){
       if(b.car_id!==c.id || !EARNED.includes(b.status)) continue;
       const p=new Date(b.pickup), e=new Date(b.status==="returned"&&b.return_at?b.return_at:(b.status==="handed"?Math.min(new Date(b.drop),now):b.drop));
       const ov=Math.max(0,(Math.min(e,end)-Math.max(p,from))/864e5); rented+=ov;
-      if(ov>0 || (p>=start && p<end)){ const L=ledger(b); const tot=(e-p)/864e5; rev+= tot>0 ? L.total*Math.min(1,ov/tot) : 0; }
+      if(ov>0 || (p>=start && p<end)){ const tot=(e-p)/864e5; rev+= tot>0 ? earnedOf(b)*Math.min(1,ov/tot) : 0; }
     }
     const x=expTotal(expFor(c.id), k=>{ const d=new Date(k+"-15T12:00"); return d>=new Date(start.getFullYear(),start.getMonth(),1) && d<end; });
     return {c, avail, rented:Math.min(rented,avail||rented), rev, exp:x, profit:rev-x};
@@ -2345,7 +2462,7 @@ function ym(d){ const x=new Date(d); return isNaN(x)?"":`${x.getFullYear()}-${pa
 function fyStartYear(d){ const x=new Date(d); return x.getMonth()>=3 ? x.getFullYear() : x.getFullYear()-1; }
 function fyName(y){ return `FY ${String(y).slice(2)}-${String(y+1).slice(2)}`; }
 function monthName(k){ const [y,m]=k.split("-").map(Number); return `${MONTHS[m-1]} ${y}`; }
-function sumUp(list){ let rev=0,rec=0,days=0,out=0; for(const b of list){ const L=ledger(b); rev+=L.total; rec+=L.settled; days+=L.c.days; out+=Math.max(0,L.balance); } return {n:list.length,rev,rec,days,out}; }
+function sumUp(list){ let rev=0,rec=0,days=0,out=0; for(const b of list){ const L=ledger(b); rev+=earnedOf(b); rec+=L.settled; days+=L.c.days; out+=Math.max(0,L.balance); } return {n:list.length,rev,rec,days,out}; }
 function revModel(){
   const car = S.repCar && S.repCar!=="all" ? S.fleet.find(c=>c.id===S.repCar) || (S.bookings.find(b=>b.car_id===S.repCar)?.car_snapshot) : null;
   const month = S.repMonth || ym(new Date());
@@ -2409,6 +2526,7 @@ function viewRevenue(){
       </div></section>`:""}
   </div>
   ${utilHTML(R)}
+  ${operatorsHTML(R)}
   <div class="head-row" style="margin-top:18px;align-items:center">
     <h3 style="font-size:17px;margin:0">Bookings${car?` · ${esc(car.plate||"")} ${esc(car.make_model||"")}`:""}</h3>
     <div class="actions">${S.downloads?`<button class="btn sm primary" data-act="trips-xlsx">Trips sheet (Excel)</button><button class="btn sm" data-act="rep-export">Export sheet (CSV)</button>`:""}</div>
@@ -2457,13 +2575,14 @@ async function saveBooking(asDraft){
   const cust = await upsertCustomerFrom(f); if(cust) f.customer_id = cust.id;
   const doc = {...(prev||{}), ...f, phone: fmtPhone(f.phone), id, status,
     rate:f.rate===""?"":Number(f.rate), deposit:f.deposit===""?"":Number(f.deposit),
-    car_snapshot: car ? {make_model:car.make_model, plate:car.plate, colour:car.colour||"", year:car.year||"", fuel:car.fuel||"", transmission:car.transmission||"", category:car.category||"", seats:car.seats||"", chassis_last5:car.chassis_last5||"", reg_type:car.reg_type||"", permit_no:car.permit_no||"", insurance_no:car.insurance_no||"", insurer:car.insurer||"", insurance_till:car.insurance_till||"", idv:car.idv||"", puc_till:car.puc_till||"", fastag:car.fastag||""} : (prev?.car_snapshot||null),
+    car_snapshot: car ? carSnapshot(car) : (prev?.car_snapshot||null),
     created_at: prev?.created_at || new Date().toISOString(), updated_at:new Date().toISOString(),
     agreement_date: prev?.agreement_date || toLocalInput().slice(0,10), template_version:"2.0"};
   delete doc.example;
   const advAmt=Number(f.adv_amt)||0;
   if(f.adv_yes==="yes" && advAmt>0 && !(doc.payments||[]).some(p=>p.advance)) doc.payments=[...(doc.payments||[]), {id:"p"+Date.now().toString(36), kind:"payment", advance:true, amount:advAmt, mode:f.adv_mode||"UPI", ref:f.adv_ref||"", at:toLocalInput()}];
   ["adv_yes","adv_amt","adv_mode","adv_ref"].forEach(k=>delete doc[k]);
+  if(car?.ownership==="operator"){ doc.trip_type="OPERATOR"; doc.operator_name=doc.operator_name||car.operator_name||""; }
   if(doc.trip_type!=="OPERATOR") doc.operator_name="";
   if(!(await write("bookings/"+id, doc))) return;
   localUpsert(S.bookings, doc);
@@ -2508,6 +2627,7 @@ async function copy(text, done){
 }
 
 document.addEventListener("click", async e=>{
+  const os=e.target.closest("summary[data-opsum]"); if(os){ const d=os.parentElement; S.opOpen = d.open ? null : os.dataset.opsum; return; }
   const ra=e.target.closest("a[data-remind]");
   if(ra){ const b=S.bookings.find(x=>x.id===ra.dataset.id); if(b) setTimeout(()=>patchBooking(b,{reminders:{...(b.reminders||{}), [ra.dataset.remind]:new Date().toISOString()}}),300); return; }
   if(e.target.closest('[data-act="sign-remove"]')){ if(confirm("Remove your saved signature?")) saveSignSettings({owner_sign:""},"Signature removed."); return; }
@@ -2534,7 +2654,10 @@ document.addEventListener("click", async e=>{
   switch(act){
     case "new": S.editId=null; S.draft=null; S.view="new"; render(); break;
     case "quick": S.editId=null; S.quick=null; S.view="quick"; S.selected=null; render(); window.scrollTo(0,0); $("#q_phone")?.focus(); break;
-    case "new-full": { const q=readQuick(); S.editId=null; S.draft={trip_to:q.trip_to, trip_type:q.trip_type, operator_name:q.operator_name, phone:q.phone, name:q.name, car_id:q.car_id, pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, adv_yes:q.adv, adv_amt:q.adv_amt, adv_mode:q.adv_mode, adv_ref:q.adv_ref}; S.view="new"; render(); window.scrollTo(0,0); break; }
+    case "new-full": { const q=readQuick(); S.editId=null; S.draft={pickup_mode:q.pickup_mode, pickup_address:q.pickup_address, pickup_charge:q.pickup_charge, drop_mode:q.drop_mode, drop_address:q.drop_address, drop_charge:q.drop_charge, trip_to:q.trip_to, trip_type:q.trip_type, operator_name:q.operator_name, phone:q.phone, name:q.name, car_id:q.car_id, pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, adv_yes:q.adv, adv_amt:q.adv_amt, adv_mode:q.adv_mode, adv_ref:q.adv_ref}; S.view="new"; render(); window.scrollTo(0,0); break; }
+    case "op-save-com": { S.opOpen=b.id; const v=($("#o_com")?.value??"").trim(); if(v!=="" && !(Number(v)>=0)){ toast("Enter a valid amount."); break; } if(await patchBooking(b,{commission: v===""?"":Number(v)})) toast(v===""?"Commission cleared.":`Commission ${inr(v)} saved.`); break; }
+    case "op-pay": { S.opOpen=b.id; const amt=Number($("#o_amt")?.value); if(!(amt>0)){ toast("Enter the amount paid to the operator."); break; } const p={id:"o"+Date.now().toString(36), amount:amt, mode:$("#o_mode").value, ref:$("#o_ref").value.trim(), at:$("#o_at").value||toLocalInput()}; if(await patchBooking(b,{op_payouts:[...(b.op_payouts||[]),p]})) toast(`Payment ${inr(amt)} to operator recorded.`); break; }
+    case "op-del-pay": { S.opOpen=b.id; if(await patchBooking(b,{op_payouts:(b.op_payouts||[]).filter(p=>p.id!==t.dataset.id)})) toast("Removed."); break; }
     case "goto-settings": S.view="settings"; S.selected=null; render(); window.scrollTo(0,0); break;
     case "copy-paylink": { const amt=Math.round(Number($("#u_amt")?.value)||0); if(amt>0) copy(payLinkFor(b,amt),"Payment link copied."); else toast("Enter an amount first."); break; }
     case "review-skip": { const x=S.bookings.find(y=>y.id===t.dataset.id); if(x && await patchBooking(x,{reminders:{...(x.reminders||{}), review:"skipped"}})) toast("Removed from the list."); break; }
@@ -2729,6 +2852,10 @@ document.addEventListener("keydown", e=>{ if(e.target.id==="f_phone" && e.key===
 document.addEventListener("change", e=>{
   if(e.target.id==="f_pickup"||e.target.id==="f_drop") refreshCarOptions();
   if(e.target.id==="f_deptype") showDepFields();
+  if(e.target.id==="c_own") document.querySelectorAll(".opcar").forEach(el=>el.hidden=e.target.value!=="operator");
+  if(/(pumode|drmode)$/.test(e.target.id)){ document.querySelectorAll(`.dsf[data-for="${e.target.id}"]`).forEach(el=>el.hidden=e.target.value==="office");
+    if(/drmode$/.test(e.target.id) && e.target.value==="collection"){ const pf=e.target.id.slice(0,2), d=$("#"+pf+"draddr"), pa=$("#"+pf+"puaddr"); if(d && !d.value && pa && pa.value) d.value=pa.value; }
+    updateSummary(); qSummary(); }
   if(/triptype$/.test(e.target.id)){ const f=document.querySelector(`.opf[data-for="${e.target.id}"]`); if(f){ f.hidden=e.target.value!=="OPERATOR"; if(!f.hidden) f.querySelector("input")?.focus(); } }
   if(e.target.id==="q_adv") document.querySelectorAll(".qadvf").forEach(el=>el.hidden=e.target.value!=="yes");
   if(e.target.id==="f_advyes") document.querySelectorAll(".advf").forEach(el=>el.hidden=e.target.value!=="yes");
@@ -2756,12 +2883,14 @@ document.addEventListener("submit", async e=>{
     const make=v("c_make"), plate=v("c_plate").toUpperCase().replace(/\s+/g," "), rate=v("c_rate");
     const errs=[]; if(!make) errs.push("Enter the make and model."); if(!plate) errs.push("Enter the registration number."); if(!(Number(rate)>0)) errs.push("Enter the daily rate.");
     const dup=S.fleet.find(c=>c.plate.replace(/\s/g,"")===plate.replace(/\s/g,"") && c.id!==S.carEdit); if(dup) errs.push("A car with this registration number already exists.");
+    if(v("c_own")==="operator" && !v("c_opname")) errs.push("Enter the operator's name.");
     if(errs.length){ $("#carerr").innerHTML=`<div class="errors" style="margin-bottom:12px"><ul>${errs.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`; return; }
     const prev=S.carEdit==="new"?null:S.fleet.find(c=>c.id===S.carEdit);
     const id=prev?.id || plate.replace(/[^A-Z0-9]/g,"");
     const doc={...(prev||{}), id, make_model:make, plate, chassis_last5:v("c_chassis").toUpperCase(), category:v("c_cat"), colour:v("c_colour"), year:v("c_year"), fuel:v("c_fuel"), transmission:v("c_trans"), seats:v("c_seats"), fastag:v("c_fastag"),
       reg_type:v("c_regtype"), permit_no:v("c_permit"), insurance_no:v("c_ins"), insurer:v("c_insurer"), insurance_till:v("c_ins_till"), idv:v("c_idv")?Number(v("c_idv")):"", puc_till:v("c_puc"),
       rate:Number(rate), deposit:Number(v("c_dep")||0), active:v("c_active")!=="no",
+      ownership:v("c_own")||"own", operator_name:v("c_own")==="operator"?v("c_opname"):"", operator_phone:v("c_own")==="operator"?v("c_opphone"):"", owner_name:v("c_own")==="operator"?v("c_ownername"):"",
       service_interval:Number(v("c_svc_int"))||10000, service_km:v("c_svc_km")?Number(v("c_svc_km")):"", service_date:v("c_svc_date"),
       odo_manual:v("c_odo")?Number(v("c_odo")):"", odo_manual_at:(v("c_odo") && String(prev?.odo_manual??"")!==v("c_odo")) ? new Date().toISOString() : (prev?.odo_manual_at||""),
       created_at:prev ? (prev.created_at||"") : new Date().toISOString()};

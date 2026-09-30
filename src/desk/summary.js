@@ -43,7 +43,9 @@ export function money(b, s) {
     const baseDays = bh > 0 ? Math.max(1, Math.ceil(bh / 24 - 1e-9)) : 0;
     rental = baseDays * rate + ext.reduce((t, x) => t + n(x.amount), 0);
   }
-  const delivery = b.with_delivery ? n(charge(b, s, 'delivery_charge', 0)) : 0;
+  const delivery = (b.pickup_mode || b.drop_mode)
+    ? (b.pickup_mode === 'delivery' ? n(b.pickup_charge) : 0) + (b.drop_mode === 'collection' ? n(b.drop_charge) : 0)
+    : (b.with_delivery ? n(charge(b, s, 'delivery_charge', 0)) : 0);
   const extras = (b.extras || []).reduce((t, x) => t + n(x.amount), 0);
   const pays = b.payments || [];
   const k = kind => pays.filter(x => x.kind === kind).reduce((t, x) => t + n(x.amount), 0);
@@ -53,7 +55,7 @@ export function money(b, s) {
   const depIn = k('deposit_in');
   const depHeld = depIn - k('deposit_used') - k('deposit_refund');
   const balance = total - settled;
-  return { days, hours, rental, total, settled, balance, depCash, depIn, depHeld, depositDue: Math.max(0, depCash - depIn), km: days * n(charge(b, s, 'km_per_day', 0)) };
+  return { days, hours, rental, delivery, total, settled, balance, depCash, depIn, depHeld, depositDue: Math.max(0, depCash - depIn), km: days * n(charge(b, s, 'km_per_day', 0)) };
 }
 // Amount the customer should pay now: rental balance, plus the deposit before handover.
 export function dueNow(b, s) {
@@ -139,10 +141,22 @@ export function daySummary({ bookings, fleet, settings, now = new Date() }) {
     const st = serviceStatus(c, bookings);
     if (st.state === 'due' || st.state === 'soon') service.push({ car: c, st, label: serviceLabel(st) });
   }
+  // Operator cars: money still owed to the operator, or commission not entered yet.
+  const operatorPay = [];
+  for (const b of live) {
+    const car = fleet.find(c => c.id === b.car_id) || b.car_snapshot || {};
+    if (car.ownership !== 'operator' || b.status !== 'returned') continue;
+    const m = money(b, settings);
+    const com = (b.commission === '' || b.commission == null) ? null : n(b.commission);
+    const paid = (b.op_payouts || []).reduce((t, p) => t + n(p.amount), 0);
+    const pending = com == null ? null : Math.max(0, m.total - m.delivery - com) - paid;
+    if (com == null) operatorPay.push({ b, operator: b.operator_name || car.operator_name || 'Operator', amount: null });
+    else if (pending > 0) operatorPay.push({ b, operator: b.operator_name || car.operator_name || 'Operator', amount: pending });
+  }
   const weekAgo = new Date(now.getTime() - 7 * DAY);
   const reviews = live.filter(b => b.status === 'returned' && !(b.reminders || {}).review && parseLocal(b.returned_at || b.return_at || b.drop) >= weekAgo);
   const collectTotal = toCollect.filter(x => x.amount > 0).reduce((t, x) => t + x.amount, 0);
-  return { date: istYmd(now), now, pickupsToday, pickupsTomorrow, missedPickups, overdue, returnsToday, returnsTomorrow, out, toCollect, collectTotal, papers, service, reviews };
+  return { date: istYmd(now), now, pickupsToday, pickupsTomorrow, missedPickups, overdue, returnsToday, returnsTomorrow, out, toCollect, collectTotal, papers, service, reviews, operatorPay };
 }
 
 function carName(b, fleet) { const c = fleet.find(x => x.id === b.car_id) || b.car_snapshot || {}; return `${c.make_model || ''}${c.plate ? ` (${c.plate})` : ''}`.trim(); }
@@ -158,6 +172,7 @@ export function summaryText(S, { fleet, settings }) {
   sec(`Returns today (${S.returnsToday.length})`, S.returnsToday.map(b => `• ${fmtTime(b.drop)} ${b.name} · ${carName(b, fleet)}`));
   sec(`Pickups tomorrow (${S.pickupsTomorrow.length})`, S.pickupsTomorrow.map(b => `• ${fmtTime(b.pickup)} ${b.name} · ${carName(b, fleet)}`));
   sec(`To collect (${inr(S.collectTotal)})`, S.toCollect.map(x => `• ${x.b.name}: ${x.amount < 0 ? `refund/settle deposit ${inr(-x.amount)}` : `${inr(x.amount)} ${x.why}`}`));
+  sec('Operators', (S.operatorPay || []).map(x => `• ${x.operator} (${x.b.name}): ${x.amount == null ? 'enter your commission' : `pay ${inr(x.amount)}`}`));
   sec('Papers', S.papers.map(p => `• ${p.car.plate}: ${p.label}`));
   sec('Service', S.service.map(x => `• ${x.car.plate}: ${x.label}`));
   sec('Ask for a Google review', S.reviews.map(b => `• ${b.name}`));
@@ -181,6 +196,7 @@ export function summaryHTML(S, { fleet, settings, origin }) {
     box('Returns today', S.returnsToday.map(b => [who(b), h(fmtTime(b.drop))])),
     box('Pickups tomorrow', S.pickupsTomorrow.map(b => [who(b), h(fmtTime(b.pickup))])),
     box('To collect', S.toCollect.map(x => [who(x.b), x.amount < 0 ? `settle deposit ${inr(-x.amount)}` : `<b>${inr(x.amount)}</b><br><span style="color:#6E5C4C;font-size:12px">${h(x.why)}</span>`])),
+    box('Operators', (S.operatorPay || []).map(x => [`<b>${h(x.operator)}</b><br><span style="color:#6E5C4C;font-size:12.5px">${h(x.b.name)} · ${h(carName(x.b, fleet))}</span>`, x.amount == null ? '<span style="color:#9A6412">enter commission</span>' : `pay <b>${inr(x.amount)}</b>`])),
     box('Papers', S.papers.map(p => [`<b>${h(p.car.plate)}</b> ${h(p.car.make_model || '')}`, `<span style="color:${p.bad ? '#B0281F' : '#9A6412'}">${h(p.label)}</span>`])),
     box('Service', S.service.map(x => [`<b>${h(x.car.plate)}</b> ${h(x.car.make_model || '')}`, `<span style="color:${x.st.state === 'due' ? '#B0281F' : '#9A6412'}">${h(x.label)}</span>`])),
     box('Ask for a Google review', S.reviews.map(b => [who(b), 'returned'])),
