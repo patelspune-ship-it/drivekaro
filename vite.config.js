@@ -13,6 +13,8 @@ export default defineConfig({
         desk: resolve(import.meta.dirname, 'desk.html'),
         // Public UPI payment page, served at /pay
         pay: resolve(import.meta.dirname, 'pay.html'),
+        // DriveKaro AI Marketer (owner only), served at /marketer
+        marketer: resolve(import.meta.dirname, 'marketer.html'),
       },
     },
   },

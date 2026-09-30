@@ -100,3 +100,25 @@ The owner's plain-language guide ("DriveKaro System Handover Guide") covers acco
 - Owner adds staff in Desk → Settings → Staff logins (name, mobile, password). This creates a Supabase Auth user `s<mobile>@staff.drivekaro.in`; staff sign in at `/desk` with their mobile number.
 - Staff never query the database: `api/staff.js` returns only bookings in scope (pickups yesterday–tomorrow, cars out, today's returns) without `commission`, `op_payouts` or `notes`, and accepts only whitelisted fields and steps (`api/_lib/staff.js` `applyStaffPatch`). eSign send/status also accept staff.
 - Staff photos go to the owner's Google Drive through a server-side refresh token (Settings → Connect Google Drive for staff). Needs Vercel Secret `GOOGLE_CLIENT_SECRET` (the OAuth web client's secret); the refresh token is stored in `desk_docs` `secrets/drive_server`.
+
+## AI Marketer (`/marketer`)
+
+A separate owner-only page (not linked from the desk yet). It plans a month of Instagram and Google Business Profile posts, draws branded images, writes captions and can post them automatically.
+
+**Files:** `marketer.html`, `src/marketer/` (`calendar.js` holidays and long weekends, `planner.js` monthly plan, `copy.js` captions, `render.js` canvas images, `main.js` UI), `api/marketer.js` (server + autopilot cron), `supabase/marketer_setup.sql`.
+
+**Data (desk_docs):** `mk_settings/brand`, `mk_posts`, `mk_photos`, `mk_events` (your own days), `mk_cache` (holiday feeds, 7 days), `secrets/gbp` (Google Business connection). Images live in the public Supabase Storage bucket `marketing` (car photos in `photos/`, finished posts in `posts/<id>/`). Never put KYC documents in that bucket.
+
+**Holidays:** the server reads Google's public "Holidays in India" calendar and, if `CALENDARIFIC_API_KEY` is set, Calendarific (Maharashtra). Built-in Maharashtra holiday lists (2026, 2027, marked ≈) fill gaps and cover outages. Special days (Valentine's, Mother's Day, Friendship Day…) are computed. The owner can hide wrong dates and add their own days in the Holidays tab. Add the next year's built-in list in `calendar.js` (`FALLBACK`) each year.
+
+**Setup**
+1. Supabase → SQL Editor: run `supabase/marketer_setup.sql` (creates the public `marketing` bucket and owner-only upload rules).
+2. Vercel env (Secret / Sensitive, no `VITE_` prefix), all optional except where noted:
+   - `IG_USER_ID`, `META_ACCESS_TOKEN`: Instagram posting. Needs an Instagram **Business or Creator** account. Create a Meta app (developers.facebook.com), add the Instagram product, and generate a long-lived token with `instagram_business_content_publish` (Instagram login, then also set `IG_GRAPH_HOST=graph.instagram.com`) or `instagram_content_publish` + `pages_show_list` via a Facebook Page (default host `graph.facebook.com`). `META_GRAPH_VERSION` defaults to `v23.0`. Long-lived tokens expire after 60 days unless you use a System User token.
+   - Google Business Profile: uses the existing Google OAuth client (`VITE_GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`). In Google Cloud enable "My Business Account Management API", "My Business Business Information API" and "Google My Business API", and request Business Profile API access (form at developers.google.com/my-business, approval can take days; until then quota is 0). Then press Connect in Brand & connections and choose the location.
+   - `ANTHROPIC_API_KEY`: turns on "Rewrite with AI" (model `claude-haiku-4-5-20251001`, change with `MARKETER_AI_MODEL`). Without it captions come from templates.
+   - `CALENDARIFIC_API_KEY`: second holiday source (free plan is enough).
+   - `CRON_SECRET` (already set for the daily email) is required for autopilot.
+3. Autopilot: Vercel Cron calls `GET /api/marketer` daily at 03:00 UTC (8:30–9:30 AM IST on the Hobby plan). It posts only **approved** posts dated today (or yesterday if they failed) and only when Autopilot is ticked. Failures are emailed to the daily-summary address.
+
+**Flow:** Plan → Make plan → check/edit each post → Approve (renders post 1080×1350, story 1080×1920 and square 1080×1080 and uploads them) → autopilot or "Post now". Without Meta/Google set up, use Copy caption + Download image and post by hand.
