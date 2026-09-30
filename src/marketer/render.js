@@ -153,6 +153,34 @@ function heart(x, cx, cy, s) { x.beginPath(); x.moveTo(cx, cy + s * 0.35); x.bez
 function wave(x, W, y, h, dir) { x.beginPath(); x.moveTo(0, y); x.lineTo(0, y + dir * h); for (let i = 0; i <= 20; i++) x.lineTo(i * W / 20, y + dir * (h * 0.6 + Math.sin(i / 20 * Math.PI * 2) * h * 0.25)); x.lineTo(W, y); x.fill(); }
 function steering(x, cx, cy, r, color) { x.save(); x.strokeStyle = color; x.lineWidth = r * 0.16; x.beginPath(); x.arc(cx, cy, r, 0, 7); x.stroke(); x.beginPath(); x.arc(cx, cy, r * 0.18, 0, 7); x.fillStyle = color; x.fill(); x.lineWidth = r * 0.14; x.beginPath(); x.moveTo(cx - r, cy); x.lineTo(cx + r, cy); x.moveTo(cx, cy); x.lineTo(cx, cy + r); x.stroke(); x.restore(); }
 
+
+/* ---------- cut-out cars (transparent PNG) ---------- */
+const trimCache = new WeakMap();
+// Crop away the empty transparent margin around the car so it can be sized properly.
+export function trimmed(img) {
+  if (trimCache.has(img)) return trimCache.get(img);
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+  let d; try { d = x.getImageData(0, 0, w, h).data; } catch { trimCache.set(img, img); return img; }
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y += 2) for (let i = 0; i < w; i += 2) if (d[(y * w + i) * 4 + 3] > 24) { if (i < x0) x0 = i; if (i > x1) x1 = i; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (x1 < 0) { trimCache.set(img, img); return img; }
+  const o = document.createElement('canvas'); o.width = x1 - x0 + 2; o.height = y1 - y0 + 2;
+  o.getContext('2d').drawImage(c, x0, y0, o.width, o.height, 0, 0, o.width, o.height);
+  trimCache.set(img, o); return o;
+}
+// Car standing in a box: fitted, bottom-aligned, with a soft floor shadow.
+function drawCar(x, img, X, Y, W, H, { shadow = 0.45, glow = null } = {}) {
+  const t = trimmed(img); const s = Math.min(W / t.width, H / t.height); const w = t.width * s, h = t.height * s;
+  const cx = X + W / 2, by = Y + H;
+  if (glow) { const g = x.createRadialGradient(cx, by - h * 0.55, 10, cx, by - h * 0.55, Math.max(w, h) * 0.75); g.addColorStop(0, glow); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(X - W * 0.2, Y - H * 0.3, W * 1.4, H * 1.4); }
+  x.save(); x.translate(cx, by - h * 0.03); x.scale(1, 0.1);
+  const g2 = x.createRadialGradient(0, 0, 0, 0, 0, w * 0.56); g2.addColorStop(0, `rgba(0,0,0,${shadow})`); g2.addColorStop(0.7, `rgba(0,0,0,${shadow * 0.35})`); g2.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g2; x.beginPath(); x.arc(0, 0, w * 0.56, 0, 7); x.fill(); x.restore();
+  x.drawImage(t, cx - w / 2, by - h, w, h);
+  return { w, h };
+}
+
 /* ---------- templates ---------- */
 // post: { template, headline, subline, badge, event{theme}, review }, ctx: { brand, phone, site, photo (Image), logos }
 export async function renderPost(post, ctx, format = 'post') {
@@ -163,7 +191,7 @@ export async function renderPost(post, ctx, format = 'post') {
   const phone = ctx.phone || '+91 76663 98984', site = ctx.site || 'drivekaro.in';
   const tall = H / W > 1.5, sq = H === W;
   const M = 64; // margin
-  const photo = ctx.photo || null;
+  const photo = ctx.photo || null, cut = !!(photo && ctx.cutout);
   const t = post.template;
 
   if (t === 'festival') {
@@ -175,7 +203,10 @@ export async function renderPost(post, ctx, format = 'post') {
     let y = drawLines(x, F, W / 2, top, 'center', T.ink);
     if (post.subline) { const S = fit(x, post.subline, { weight: 700, maxW: W - M * 2.6, max: 70, min: 38, maxLines: 2, lh: 1.25 }); y = drawLines(x, S, W / 2, y + 18, 'center', T.accent); }
     const bottomReserve = Math.round(H * (tall ? 0.16 : 0.14));
-    if (photo && !sq) {
+    if (cut) {
+      const top2 = y + 30, bot = H - (T.motif === 'diya' ? (tall ? 340 : 265) : bottomReserve + (tall ? 40 : 10));
+      if (bot - top2 > 160) drawCar(x, photo, M, top2, W - M * 2, bot - top2, { shadow: lightBg ? 0.35 : 0.6, glow: lightBg ? 'rgba(255,255,255,0.7)' : 'rgba(255,200,120,0.28)' });
+    } else if (photo && !sq) {
       const pw = W - M * 3, ph = Math.min(H - y - bottomReserve - 70, tall ? 720 : 520), py = y + 44;
       if (ph > 220) { x.save(); x.shadowColor = 'rgba(0,0,0,0.35)'; x.shadowBlur = 40; x.shadowOffsetY = 16; rr(x, (W - pw) / 2, py, pw, ph, 36); x.fillStyle = '#000'; x.fill(); x.restore(); cover(x, photo, (W - pw) / 2, py, pw, ph, 36); x.strokeStyle = T.accent; x.lineWidth = 6; rr(x, (W - pw) / 2, py, pw, ph, 36); x.stroke(); }
     }
@@ -186,15 +217,28 @@ export async function renderPost(post, ctx, format = 'post') {
   }
 
   if (t === 'trip') {
-    if (photo) { cover(x, photo, 0, 0, W, H); } else { gradient(x, W, H, ['#2B1A12', '#6B2A1C']); motif(x, 'road', W, H, { ink: '#000' }, post.date); }
-    const g = x.createLinearGradient(0, H * 0.28, 0, H); g.addColorStop(0, 'rgba(10,6,4,0)'); g.addColorStop(0.55, 'rgba(10,6,4,0.72)'); g.addColorStop(1, 'rgba(10,6,4,0.94)'); x.fillStyle = g; x.fillRect(0, 0, W, H);
-    const gt = x.createLinearGradient(0, 0, 0, 260); gt.addColorStop(0, 'rgba(10,6,4,0.55)'); gt.addColorStop(1, 'rgba(10,6,4,0)'); x.fillStyle = gt; x.fillRect(0, 0, W, 260);
-    logo(x, L, W - M, M, tall ? 300 : 260, true, 'right');
     const cta = Math.min(Math.round(H * 0.085), 118);
     const F = fit(x, post.headline, { maxW: W - M * 2, max: tall ? 124 : 108, min: 56, maxLines: 3 });
     const S = post.subline ? fit(x, post.subline, { weight: 600, family: BODY, maxW: W - M * 2, max: 44, min: 30, maxLines: 2, lh: 1.3 }) : null;
     const blockH = F.lines.length * F.lh + (S ? S.lines.length * S.lh + 28 : 0) + (post.badge ? 100 : 0);
     let y = H - cta - 70 - blockH;
+    if (cut) {
+      // Dusk scene: sky, hills, and a road the car stands on; text below.
+      const top2 = tall ? 260 : 170, bot = y - 40, hz = Math.round(bot - (bot - top2) * 0.32);
+      const sky = x.createLinearGradient(0, 0, 0, hz); sky.addColorStop(0, '#24172B'); sky.addColorStop(0.6, '#8C3B2A'); sky.addColorStop(1, '#F0A05A'); x.fillStyle = sky; x.fillRect(0, 0, W, hz);
+      const sun = x.createRadialGradient(W * 0.5, hz, 10, W * 0.5, hz, W * 0.55); sun.addColorStop(0, 'rgba(255,220,160,0.9)'); sun.addColorStop(1, 'rgba(255,160,90,0)'); x.fillStyle = sun; x.fillRect(0, 0, W, hz);
+      x.fillStyle = 'rgba(40,22,30,0.75)'; x.beginPath(); x.moveTo(0, hz); for (let i = 0; i <= 12; i++) x.lineTo(i * W / 12, hz - 30 - ((i * 37) % 7) * 12); x.lineTo(W, hz); x.fill();
+      const ground = x.createLinearGradient(0, hz, 0, H); ground.addColorStop(0, '#3B2A22'); ground.addColorStop(1, '#120B08'); x.fillStyle = ground; x.fillRect(0, hz, W, H - hz);
+      x.fillStyle = '#2A2A2E'; x.beginPath(); x.moveTo(W * 0.46, hz); x.lineTo(W * 0.54, hz); x.lineTo(W * 1.15, H); x.lineTo(-W * 0.15, H); x.fill();
+      x.fillStyle = 'rgba(255,255,255,0.55)'; for (let i = 0; i < 7; i++) { const t0 = i / 7, y1 = hz + (H - hz) * t0 * t0 + 6, hh = 8 + t0 * 40, ww = 3 + t0 * 14; x.fillRect(W / 2 - ww / 2, y1, ww, hh); }
+      if (bot - top2 > 180) drawCar(x, photo, M * 0.6, top2, W - M * 1.2, bot - top2, { shadow: 0.75 });
+      const gb = x.createLinearGradient(0, y - 40, 0, H); gb.addColorStop(0, 'rgba(10,6,4,0)'); gb.addColorStop(0.3, 'rgba(10,6,4,0.75)'); gb.addColorStop(1, 'rgba(10,6,4,0.95)'); x.fillStyle = gb; x.fillRect(0, y - 40, W, H);
+    } else {
+      if (photo) { cover(x, photo, 0, 0, W, H); } else { gradient(x, W, H, ['#2B1A12', '#6B2A1C']); motif(x, 'road', W, H, { ink: '#000' }, post.date); }
+      const g = x.createLinearGradient(0, H * 0.28, 0, H); g.addColorStop(0, 'rgba(10,6,4,0)'); g.addColorStop(0.55, 'rgba(10,6,4,0.72)'); g.addColorStop(1, 'rgba(10,6,4,0.94)'); x.fillStyle = g; x.fillRect(0, 0, W, H);
+    }
+    const gt = x.createLinearGradient(0, 0, 0, 260); gt.addColorStop(0, 'rgba(10,6,4,0.55)'); gt.addColorStop(1, 'rgba(10,6,4,0)'); x.fillStyle = gt; x.fillRect(0, 0, W, 260);
+    logo(x, L, W - M, M, tall ? 300 : 260, true, 'right');
     if (post.badge) { pill(x, post.badge, M, y, { bg: brand.red, fg: '#FFFFFF', size: tall ? 32 : 28, h: tall ? 70 : 62 }); y += 100; }
     y = drawLines(x, F, M, y, 'left', '#FFFFFF');
     if (S) drawLines(x, S, M, y + 20, 'left', '#F4E8D0');
@@ -210,7 +254,8 @@ export async function renderPost(post, ctx, format = 'post') {
     if (post.badge) pill(x, post.badge, W - M, M + 6, { bg: offer ? '#FFFFFF' : brand.dark, fg: offer ? brand.red : '#FFFFFF', size: 26, h: 58, align: 'right' });
     const cta = Math.min(Math.round(H * 0.085), 118);
     const pTop = tall ? 260 : 190, pH = Math.round(H * (tall ? 0.42 : sq ? 0.38 : 0.44));
-    if (photo) { x.save(); x.shadowColor = 'rgba(0,0,0,0.25)'; x.shadowBlur = 40; x.shadowOffsetY = 14; rr(x, M, pTop, W - M * 2, pH, 40); x.fillStyle = '#fff'; x.fill(); x.restore(); cover(x, photo, M, pTop, W - M * 2, pH, 40); }
+    if (cut) { drawCar(x, photo, M, pTop, W - M * 2, pH - 10, { shadow: offer ? 0.55 : 0.4, glow: offer ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.9)' }); }
+    else if (photo) { x.save(); x.shadowColor = 'rgba(0,0,0,0.25)'; x.shadowBlur = 40; x.shadowOffsetY = 14; rr(x, M, pTop, W - M * 2, pH, 40); x.fillStyle = '#fff'; x.fill(); x.restore(); cover(x, photo, M, pTop, W - M * 2, pH, 40); }
     else { x.fillStyle = offer ? 'rgba(255,255,255,0.12)' : 'rgba(26,18,12,0.06)'; rr(x, M, pTop, W - M * 2, pH, 40); x.fill(); steering(x, W / 2, pTop + pH / 2, pH * 0.28, offer ? 'rgba(255,255,255,0.55)' : brand.red); }
     let y = pTop + pH + (tall ? 70 : 44);
     const ink = offer ? '#FFFFFF' : brand.dark;

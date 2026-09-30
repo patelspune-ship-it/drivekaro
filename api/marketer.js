@@ -220,7 +220,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ig: { configured: ig.ok, host: process.env.IG_GRAPH_HOST || 'graph.facebook.com' },
         gbp: { connected: !!gbp.refresh_token, email: gbp.email || null, location: gbp.location || null, location_title: gbp.location_title || null, secret_ready: !!googleCreds().secret },
-        ai: !!process.env.ANTHROPIC_API_KEY, calendarific: !!process.env.CALENDARIFIC_API_KEY, cron: !!process.env.CRON_SECRET,
+        ai: !!process.env.ANTHROPIC_API_KEY, removebg: !!process.env.REMOVE_BG_API_KEY, calendarific: !!process.env.CALENDARIFIC_API_KEY, cron: !!process.env.CRON_SECRET,
       });
     }
     if (action === 'calendar') {
@@ -236,6 +236,25 @@ export default async function handler(req, res) {
       const post = await getDoc(sb, 'mk_posts', String(input.postId || ''));
       if (!post) throw new HttpError(404, 'Post not found. Save it first.');
       return res.status(200).json({ post: await publishPost(sb, { id: input.postId, ...post }, input.only) });
+    }
+    if (action === 'remove_bg') {
+      const key = process.env.REMOVE_BG_API_KEY; if (!key) throw new HttpError(409, 'Add REMOVE_BG_API_KEY in Vercel first.');
+      const id = String(input.photoId || ''); const ph = await getDoc(sb, 'mk_photos', id);
+      if (!ph || !httpsUrl(ph.url)) throw new HttpError(404, 'Photo not found.');
+      const form = new URLSearchParams({ image_url: ph.url, size: process.env.REMOVE_BG_SIZE || 'auto', type: ph.kind === 'place' ? 'auto' : 'car', crop: 'true', format: 'png' });
+      const r = await fetch('https://api.remove.bg/v1.0/removebg', { method: 'POST', headers: { 'X-Api-Key': key }, body: form });
+      if (!r.ok) {
+        let msg = `HTTP ${r.status}`; try { const j = await r.json(); msg = j.errors?.map(e => e.title).join('; ') || msg; } catch { /* ignore */ }
+        throw new HttpError(502, 'remove.bg: ' + (r.status === 402 ? 'no credits left on your remove.bg account.' : msg));
+      }
+      const buf = Buffer.from(await r.arrayBuffer());
+      const newId = `ph-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; const path = `photos/${newId}.png`;
+      const up = await sb.storage.from('marketing').upload(path, buf, { contentType: 'image/png', upsert: true, cacheControl: '31536000' });
+      if (up.error) throw new HttpError(500, 'Saving the cut-out failed: ' + up.error.message);
+      const url = sb.storage.from('marketing').getPublicUrl(path).data.publicUrl;
+      const doc = { url, path, car_id: ph.car_id || null, kind: ph.kind || 'car', cutout: true, from: id, name: String(ph.name || 'photo') + ' (cut-out)', created_at: new Date().toISOString() };
+      await saveDoc(sb, 'mk_photos', newId, doc);
+      return res.status(200).json({ photo: { id: newId, ...doc }, credits: r.headers.get('x-credits-charged') || null });
     }
     if (action === 'ig_check') {
       const c = igCfg(); if (!c.ok) throw new HttpError(409, 'Add IG_USER_ID and META_ACCESS_TOKEN in Vercel first.');

@@ -118,6 +118,7 @@ A separate owner-only page (not linked from the desk yet). It plans a month of I
    - Google Business Profile: uses the existing Google OAuth client (`VITE_GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`). In Google Cloud enable "My Business Account Management API", "My Business Business Information API" and "Google My Business API", and request Business Profile API access (form at developers.google.com/my-business, approval can take days; until then quota is 0). Then press Connect in Brand & connections and choose the location.
    - `ANTHROPIC_API_KEY`: turns on "Rewrite with AI" (model `claude-haiku-4-5-20251001`, change with `MARKETER_AI_MODEL`). Without it captions come from templates.
    - `CALENDARIFIC_API_KEY`: second holiday source (free plan is enough).
+   - `REMOVE_BG_API_KEY`: one-tap "Remove background" on photos (remove.bg). Cut-outs (transparent PNG, also accepted as uploads) are placed on the designs with a shadow. `REMOVE_BG_SIZE` defaults to `auto`.
    - `CRON_SECRET` (already set for the daily email) is required for autopilot.
 3. Autopilot: Vercel Cron calls `GET /api/marketer` daily at 03:00 UTC (8:30–9:30 AM IST on the Hobby plan). It posts only **approved** posts dated today (or yesterday if they failed) and only when Autopilot is ticked. Failures are emailed to the daily-summary address.
 

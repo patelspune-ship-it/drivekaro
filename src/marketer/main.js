@@ -110,15 +110,16 @@ function photoFor(p) {
   if (p.photo_id === 'none') return null;
   if (p.photo_id) return M.photos.find(x => x.id === p.photo_id) || null;
   if (['whyus', 'tip', 'review'].includes(p.template)) return null;
-  let pool = p.car_id ? M.photos.filter(x => x.car_id === p.car_id && x.kind !== 'people') : [];
-  if (!pool.length && p.template !== 'spotlight') pool = M.photos.filter(x => (p.template === 'trip' ? x.kind !== 'people' : true));
+  const prefer = list => { const cuts = list.filter(x => x.cutout), plain = list.filter(x => !x.cutout); return cuts.length ? cuts : plain; };
+  let pool = p.car_id ? prefer(M.photos.filter(x => x.car_id === p.car_id && x.kind !== 'people')) : [];
+  if (!pool.length && p.template !== 'spotlight') pool = prefer(M.photos.filter(x => (p.template === 'trip' ? x.kind !== 'people' : true)));
   return pool.length ? pool[hash(p.id) % pool.length] : null;
 }
 async function renderCtx(p) {
   const b = B(); const ph = photoFor(p);
-  return { brand: { ...BRAND_DEFAULT, ...(b.colors || {}) }, phone: b.phone, site: b.website, logos: await logos(), photo: ph ? await loadImage(ph.url) : null };
+  return { brand: { ...BRAND_DEFAULT, ...(b.colors || {}) }, phone: b.phone, site: b.website, logos: await logos(), photo: ph ? await loadImage(ph.url) : null, cutout: !!ph?.cutout };
 }
-const thumbKey = p => JSON.stringify([p.template, p.headline, p.subline, p.badge, p.event?.theme, p.review, photoFor(p)?.id, B().phone, B().website, B().colors]);
+const thumbKey = p => JSON.stringify([p.template, p.headline, p.subline, p.badge, p.event?.theme, p.review, photoFor(p)?.id, M.photos.length, B().phone, B().website, B().colors]);
 let thumbQueue = Promise.resolve();
 function queueThumb(p) {
   const key = thumbKey(p); if (M.thumbs.get(p.id)?.key === key) return;
@@ -161,9 +162,15 @@ async function shrink(file, max = 2000) {
   const s = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight)); const c = document.createElement('canvas');
   c.width = Math.round(im.naturalWidth * s); c.height = Math.round(im.naturalHeight * s); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
   URL.revokeObjectURL(url);
-  const blob = await canvasToBlob(c, 'image/jpeg', 0.88);
+  const cutout = hasTransparency(c);
+  const blob = await canvasToBlob(c, cutout ? 'image/png' : 'image/jpeg', 0.88);
   if (!blob) throw new Error('Could not shrink this photo. Try a smaller one.');
-  return { blob, w: c.width, h: c.height };
+  return { blob, w: c.width, h: c.height, cutout };
+}
+// A photo with see-through areas (a cut-out car saved as PNG/WebP).
+function hasTransparency(c) {
+  try { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4 * 37) if (d[i] < 200 && ++n > 50) return true; } catch { /* ignore */ }
+  return false;
 }
 async function uploadPhotos(files, car_id, kind) {
   const log = M.upLog = files.map(f => ({ name: f.name, state: 'waiting', msg: '' }));
@@ -171,9 +178,9 @@ async function uploadPhotos(files, car_id, kind) {
   for (let i = 0; i < files.length; i++) {
     const f = files[i]; log[i].state = 'working'; render();
     try {
-      const { blob, w, h } = await shrink(f); const id = uid('ph'); const path = `photos/${id}.jpg`;
-      const url = await uploadBlob(path, blob);
-      try { await M.db.doc('mk_photos/' + id).set({ url, path, car_id: car_id || null, kind: kind || 'car', w, h, name: f.name.slice(0, 80), created_at: new Date().toISOString() }); }
+      const { blob, w, h, cutout } = await shrink(f); const id = uid('ph'); const path = `photos/${id}.${cutout ? 'png' : 'jpg'}`;
+      const url = await uploadBlob(path, blob, cutout ? 'image/png' : 'image/jpeg');
+      try { await M.db.doc('mk_photos/' + id).set({ url, path, car_id: car_id || null, kind: kind || 'car', cutout, w, h, name: f.name.slice(0, 80), created_at: new Date().toISOString() }); }
       catch (e) { throw new Error('Photo uploaded but not saved to the list: ' + (e.message || e)); }
       log[i].state = 'ok'; n++;
     } catch (e) { log[i].state = 'bad'; log[i].msg = e.message || String(e); console.error('upload', f.name, e); }
@@ -325,6 +332,7 @@ function calendarHTML() {
 function photosHTML() {
   const cs = M.fleet.filter(c => c.active !== false);
   return `<div class="card"><h3>Add photos</h3>
+    <p class="muted small"><b>Best look:</b> cut-out cars (no background). Upload a normal photo and press <b>Remove background</b>, or upload a PNG you already cut out (iPhone: long-press the car in Photos → Share → Save; Samsung Gallery: long-press the car → Save as image). Cut-outs are placed on the DriveKaro design with a shadow.</p>
     <p class="muted small">Your real car photos make the best posts. Landscape photos in daylight work best. Photos are shrunk before upload. Only upload marketing photos here (they are public): never DL, Aadhaar or other documents.</p>
     <div class="two"><div class="field"><label>Which car</label><select id="up_car"><option value="">Not a specific car</option>${cs.map(c => `<option value="${esc(c.id)}">${esc(c.make_model)} · ${esc(c.plate || '')}</option>`).join('')}</select></div>
     <div class="field"><label>What's in it</label><select id="up_kind"><option value="car">Car</option><option value="place">Place / road trip</option><option value="people">Happy customers</option></select></div></div>
@@ -332,7 +340,7 @@ function photosHTML() {
     <div class="actions"><button class="btn primary" data-act="upload" ${M.busy.has('upload') ? 'disabled' : ''}>${M.busy.has('upload') ? 'Uploading…' : 'Upload'}</button></div>
     ${M.upLog ? `<div class="uplog">${M.upLog.map(l => `<div class="small ${l.state === 'bad' ? 'err' : l.state === 'ok' ? 'okt' : 'muted'}">${l.state === 'ok' ? '✓' : l.state === 'bad' ? '✗' : l.state === 'working' ? '…' : '·'} ${esc(l.name)}${l.msg ? ': ' + esc(l.msg) : l.state === 'working' ? ' uploading' : ''}</div>`).join('')}</div>` : ''}</div>
   <div class="card"><h3>Your photos (${M.photos.length})</h3>
-  ${M.photos.length ? `<div class="gallery">${M.photos.map(ph => `<figure><img src="${esc(ph.url)}" alt="" loading="lazy"><figcaption><select data-phcar="${esc(ph.id)}"><option value="">Any</option>${cs.map(c => `<option value="${esc(c.id)}" ${ph.car_id === c.id ? 'selected' : ''}>${esc(c.make_model)}</option>`).join('')}</select><select data-phkind="${esc(ph.id)}">${['car', 'place', 'people'].map(k => `<option ${ph.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select><button class="btn sm danger" data-act="ph-del" data-id="${esc(ph.id)}">Delete</button></figcaption></figure>`).join('')}</div>` : `<p class="muted">No photos yet. Posts use designed backgrounds until you add some.</p>`}</div>`;
+  ${M.photos.length ? `<div class="gallery">${M.photos.map(ph => `<figure class="${ph.cutout ? 'cut' : ''}"><img src="${esc(ph.url)}" alt="" loading="lazy">${ph.cutout ? '<span class="cuttag">Cut-out</span>' : ''}<figcaption>${!ph.cutout && ph.kind !== 'people' ? `<button class="btn sm primary" data-act="ph-cut" data-id="${esc(ph.id)}" ${M.busy.has('cut' + ph.id) ? 'disabled' : ''}>${M.busy.has('cut' + ph.id) ? 'Removing…' : 'Remove background'}</button>` : ''}<select data-phcar="${esc(ph.id)}"><option value="">Any</option>${cs.map(c => `<option value="${esc(c.id)}" ${ph.car_id === c.id ? 'selected' : ''}>${esc(c.make_model)}</option>`).join('')}</select><select data-phkind="${esc(ph.id)}">${['car', 'place', 'people'].map(k => `<option ${ph.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select><button class="btn sm danger" data-act="ph-del" data-id="${esc(ph.id)}">Delete</button></figcaption></figure>`).join('')}</div>` : `<p class="muted">No photos yet. Posts use designed backgrounds until you add some.</p>`}</div>`;
 }
 
 function brandHTML() {
@@ -369,6 +377,7 @@ function brandHTML() {
     <div class="conn"><div><strong>Google Business Profile</strong><div class="muted small">${gbp.connected ? `Connected${gbp.email ? ' as ' + esc(gbp.email) : ''}. ${gbp.location ? 'Posting to: ' + esc(gbp.location_title || gbp.location) : '<b>Choose your location.</b>'}` : 'Not connected.'}</div>
       ${M.locations ? `<div class="field" style="margin-top:6px"><select id="gbp_loc">${M.locations.map(l => `<option value="${esc(l.location)}" data-title="${esc(l.title)}">${esc(l.title)} · ${esc(l.address)}</option>`).join('')}</select><button class="btn sm primary" data-act="gbp-setloc">Use this location</button></div>` : ''}</div>
       <div class="actions">${gbp.connected ? `<button class="btn sm" data-act="gbp-locs" ${M.busy.has('locs') ? 'disabled' : ''}>${gbp.location ? 'Change location' : 'Choose location'}</button><button class="btn sm" data-act="gbp-off">Disconnect</button>` : `<button class="btn sm primary" data-act="gbp-connect">Connect</button>`}</div></div>
+    <div class="conn"><div><strong>Background removal</strong><div class="muted small">${st.removebg ? 'On. Use “Remove background” under any photo.' : 'Off. Add REMOVE_BG_API_KEY (from remove.bg) in Vercel for one-tap cut-outs, or upload PNG cut-outs from your phone.'}</div></div><span class="chip ${st.removebg ? 'ok' : ''}">${st.removebg ? 'On' : 'Off'}</span></div>
     <div class="conn"><div><strong>AI captions</strong><div class="muted small">${st.ai ? 'On. Use “Rewrite with AI” in any post.' : 'Off. Captions come from ready-made templates. Add ANTHROPIC_API_KEY in Vercel to turn on.'}</div></div><span class="chip ${st.ai ? 'ok' : ''}">${st.ai ? 'On' : 'Off'}</span></div>
     <div class="conn"><div><strong>Holiday feeds</strong><div class="muted small">Google's public India holiday calendar is used automatically.${st.calendarific ? ' Calendarific is on too.' : ' Optional: add CALENDARIFIC_API_KEY for a second source.'}</div></div><span class="chip ok">On</span></div>
     <div class="conn"><div><strong>Autopilot timer</strong><div class="muted small">${st.cron ? 'Ready (CRON_SECRET is set).' : 'CRON_SECRET is missing in Vercel, so autopilot cannot run.'}</div></div><span class="chip ${st.cron ? 'ok' : 'bad'}">${st.cron ? 'Ready' : 'Missing'}</span></div>`}
@@ -433,6 +442,11 @@ document.addEventListener('click', async e => {
   }
   else if (act === 'ev-del') { if (confirm('Delete this day?')) await del('mk_events/' + id); }
   else if (act === 'upload') { const files = [...($('#up_files').files || [])], car = $('#up_car').value, kind = $('#up_kind').value; if (!files.length) { toast('Choose photos first.'); return; } busy('upload', () => uploadPhotos(files, car, kind)); }
+  else if (act === 'ph-cut') busy('cut' + id, async () => {
+    if (!M.status?.removebg) throw new Error('Automatic background removal is not set up yet: add REMOVE_BG_API_KEY in Vercel (see Brand & connections). Or upload a PNG you cut out on your phone.');
+    const r = await api('remove_bg', { photoId: id });
+    toast(`Background removed${r.credits ? ` (${r.credits} credit${r.credits == 1 ? '' : 's'} used)` : ''}. The cut-out is added next to the original.`);
+  });
   else if (act === 'ph-del') { const ph = M.photos.find(x => x.id === id); if (!confirm('Delete this photo? Posts already approved keep their image.')) return; await supabase.storage.from(BUCKET).remove([ph.path]).catch(() => {}); await del('mk_photos/' + id); }
   else if (act === 'ig-check') busy('ig', async () => { const r = await api('ig_check'); toast(`Instagram OK: @${r.username || r.name}`); });
   else if (act === 'gbp-connect') connectGBP().catch(err => toast(err.message));
