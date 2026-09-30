@@ -518,7 +518,7 @@ function buildAgreement(b){
       ["Security Deposit", V(dep)],
       ["Total collected before handover", V(c.days && b.rate ? inr(c.collected) : null)],
       ["Payment mode and reference", V([b.paymode,b.payref].filter(Boolean).join(", "))],
-      ["DriveKaro's official payment accounts", V([s.official_upi && "UPI "+s.official_upi, s.official_bank && "Bank "+s.official_bank].filter(Boolean).join("; "))],
+      ["DriveKaro's official payment accounts", V([upiList().length && "UPI "+allUpisText(), s.official_bank && "Bank "+s.official_bank].filter(Boolean).join("; "))],
       ["Kilometre allowance", `${ch(b,"km_per_day")} km per 24 hours (${c.km||"__"} km for this booking)`],
       ["Excess kilometre charge", `${money(b,"extra_km")} per km${Number(ch(b,"km_tolerance"))>0?` (not charged if the excess is ${ch(b,"km_tolerance")} km or less)`:""}`],
       ["Grace period for return", `${ch(b,"grace_minutes")} minutes`],
@@ -813,7 +813,7 @@ function invoiceText(b){
   lines.push(`*Total: ${inr(L.total)}*`, `Paid: ${inr(L.settled)}`, L.balance>0?`*Balance due: ${inr(L.balance)}*`:L.balance<0?`Excess paid, to be refunded: ${inr(-L.balance)}`:`Paid in full`);
   if(depType(b)!=="cash") lines.push(``, `Security deposit: ${depShort(b)} (${b.dep_returned_at?"returned":"held"})`);
   if(L.depIn) lines.push(``, `Security deposit: received ${inr(L.depIn)}${L.depUsed?`, adjusted ${inr(L.depUsed)}`:""}${L.depOut?`, refunded ${inr(L.depOut)}`:""}${L.depHeld>0?`, held ${inr(L.depHeld)}`:""}`);
-  if(L.balance>0 && s.official_upi) lines.push(``, `Pay online: ${payLinkFor(b,L.balance)}`, `Please pay only to our UPI ID: ${s.official_upi}`);
+  if(L.balance>0 && upiList().length) lines.push(``, `Pay online: ${payLinkFor(b,L.balance)}`, `Please pay only to our UPI ID${upiList().length>1?"s":""}: ${allUpisText()}`);
   lines.push(``, `${s.legal_name} · ${s.support_phone}`);
   return lines.join("\n");
 }
@@ -842,8 +842,8 @@ function invoiceHTML(b){
     ${L.balance<=0?`<p class="inv-stamp">${L.balance<0?"EXCESS PAID":"PAID IN FULL"}</p>`:""}
     ${depType(b)!=="cash"?`<p><b>Security deposit:</b> ${esc(depShort(b))}, ${b.dep_returned_at?"returned":"held by DriveKaro"}. Not part of the invoice amount.</p>`:""}
     ${L.depIn?`<p><b>Security deposit:</b> received ${inr(L.depIn)}${L.depUsed?`; adjusted against charges ${inr(L.depUsed)}`:""}${L.depOut?`; refunded ${inr(L.depOut)}`:""}; ${L.depHeld>0?`held ${inr(L.depHeld)}`:"fully settled"}. The deposit is not part of the invoice amount.</p>`:""}
-    ${L.balance>0&&s.official_upi?`<div class="inv-qr"><img data-qr="${esc(upiFor(b,L.balance))}" alt="UPI QR code" width="110" height="110"><div><b>Scan to pay ${inr(L.balance)}</b><br>UPI ID ${esc(s.official_upi)}<br><span style="font-size:12px">or open ${esc(payLinkFor(b,L.balance))}</span></div></div>`:""}
-    ${L.balance>0&&(s.official_upi||s.official_bank)?`<p><b>Pay only to:</b> ${esc([s.official_upi&&"UPI "+s.official_upi, s.official_bank&&"Bank "+s.official_bank].filter(Boolean).join(" · "))}</p>`:""}
+    ${L.balance>0&&upiList().length?`<div class="inv-qr"><img data-qr="${esc(upiFor(b,L.balance))}" alt="UPI QR code" width="110" height="110"><div><b>Scan to pay ${inr(L.balance)}</b><br>UPI ID ${esc(upiPick().upi)}<br><span style="font-size:12px">or open ${esc(payLinkFor(b,L.balance))}</span></div></div>`:""}
+    ${L.balance>0&&(upiList().length||s.official_bank)?`<p><b>Pay only to:</b> ${esc([upiList().length&&"UPI "+allUpisText(), s.official_bank&&"Bank "+s.official_bank].filter(Boolean).join(" · "))}</p>`:""}
     <p class="inv-foot">${esc(s.legal_name)} is not registered under GST; no GST has been charged. This invoice is issued under the rental agreement ${esc(b.id)}.</p>
   </div>`;
 }
@@ -872,8 +872,8 @@ function invoicePdf(b, qr){
   doc.setFont("helvetica","normal");
   if(depType(b)!=="cash"){ wrap(`Security deposit: ${depShort(b)}, ${b.dep_returned_at?"returned":"held by DriveKaro"}. Not part of the invoice amount.`,CW).forEach(l=>{ t(l,M,y); y+=4.5; }); y+=2; }
   if(L.depIn){ wrap(`Security deposit: received ${inr(L.depIn)}${L.depUsed?`; adjusted against charges ${inr(L.depUsed)}`:""}${L.depOut?`; refunded ${inr(L.depOut)}`:""}; ${L.depHeld>0?`held ${inr(L.depHeld)}`:"fully settled"}. The deposit is not part of the invoice amount.`,CW).forEach(l=>{ t(l,M,y); y+=4.5; }); y+=2; }
-  if(L.balance>0 && qr){ if(y>297-60){ doc.addPage(); y=M; } try{ doc.addImage(qr,"PNG",M,y,32,32); }catch(e){} doc.setFont("helvetica","bold"); t(`Scan to pay ${inr(L.balance)}`,M+37,y+8); doc.setFont("helvetica","normal"); t(`UPI ID ${s.official_upi}`,M+37,y+14); doc.setFontSize(8); t(payLinkFor(b,L.balance),M+37,y+20); doc.setFontSize(9); y+=38; }
-  if(L.balance>0&&(s.official_upi||s.official_bank)){ t(`Pay only to: ${[s.official_upi&&"UPI "+s.official_upi, s.official_bank&&"Bank "+s.official_bank].filter(Boolean).join(" | ")}`,M,y); y+=6; }
+  if(L.balance>0 && qr){ if(y>297-60){ doc.addPage(); y=M; } try{ doc.addImage(qr,"PNG",M,y,32,32); }catch(e){} doc.setFont("helvetica","bold"); t(`Scan to pay ${inr(L.balance)}`,M+37,y+8); doc.setFont("helvetica","normal"); t(`UPI ID ${upiPick().upi}`,M+37,y+14); doc.setFontSize(8); t(payLinkFor(b,L.balance),M+37,y+20); doc.setFontSize(9); y+=38; }
+  if(L.balance>0&&(upiList().length||s.official_bank)){ t(`Pay only to: ${[upiList().length&&"UPI "+allUpisText(), s.official_bank&&"Bank "+s.official_bank].filter(Boolean).join(" | ")}`,M,y); y+=6; }
   doc.setFontSize(8); doc.setTextColor(110); wrap(`${s.legal_name} is not registered under GST; no GST has been charged. This invoice is issued under the rental agreement ${b.id}.`,CW).forEach(l=>{ t(l,M,y+4); y+=4; });
   return doc.output("blob");
 }
@@ -902,13 +902,14 @@ function viewPayments(b){
       ${selectHTML("p_kind","Type","payment",Object.entries(PAY_KINDS))}
       ${fieldHTML("p_amount","Amount (₹)","",{type:"number",attrs:'min="1" inputmode="numeric"'})}
       ${selectHTML("p_mode","Mode","UPI",PAYMODES.map(m=>[m,m]))}
+      ${upiList().length>1?selectHTML("p_to","Received in (UPI)",defaultUpiId(),[["","—"],...upiList().map(u=>[u.id,`${u.label||"UPI"} · ${u.upi}`])]):""}
       ${fieldHTML("p_ref","Reference","",{hint:"UPI / bank ref"})}
       ${fieldHTML("p_at","Date and time",toLocalInput(),{type:"datetime-local"})}
     </div>
     <div id="payerr"></div>
     <div class="actions" style="margin-top:10px"><button type="button" class="btn primary" data-act="add-pay">Add entry</button></div>
     ${L.pays.length?`<div class="tablewrap"><table class="ptable num"><thead><tr><th>Date</th><th>Type</th><th>Mode</th><th style="text-align:right">Amount</th><th></th></tr></thead><tbody>
-      ${L.pays.map(p=>`<tr><td>${esc(fmtDT(p.at))}</td><td>${esc(payLabel(p))}${p.by?`<br><small class="muted">by ${esc(p.by)}</small>`:""}</td><td>${esc(p.mode||"")}${p.ref?`<br><small class="muted">${esc(p.ref)}</small>`:""}</td><td style="text-align:right">${p.kind==="deposit_refund"?"− ":""}${inr(p.amount)}</td>
+      ${L.pays.map(p=>`<tr><td>${esc(fmtDT(p.at))}</td><td>${esc(payLabel(p))}${p.by?`<br><small class="muted">by ${esc(p.by)}</small>`:""}</td><td>${esc(p.mode||"")}${p.to?` · ${esc(p.to)}`:""}${p.ref?`<br><small class="muted">${esc(p.ref)}</small>`:""}</td><td style="text-align:right">${p.kind==="deposit_refund"?"− ":""}${inr(p.amount)}</td>
         <td class="rowact">${waButton(b.phone, receiptText(b,p,L), "Receipt", "btn sm")}${S.confirmPay===p.id?`<button class="btn sm danger" data-act="del-pay" data-id="${esc(p.id)}">Confirm delete</button><button class="btn sm" data-act="keep-pay">Keep</button>`:`<button class="btn sm" data-act="ask-del-pay" data-id="${esc(p.id)}" aria-label="Delete entry">Delete</button>`}</td></tr>`).join("")}
     </tbody></table></div>`:`<p class="muted" style="margin:12px 0 0;font-size:14px">No payments recorded yet.</p>`}
   </section>
@@ -1456,7 +1457,9 @@ function viewSettings(){
       ${fieldHTML("s_phone","Support phone",g("support_phone"))}
       ${fieldHTML("s_email","Support email",g("support_email"))}
       ${fieldHTML("s_griev","Grievance email",g("grievance_email"),{hint:"For data and dispute requests."})}
-      ${fieldHTML("s_upi","Official UPI ID",g("official_upi"),{hint:"Printed so customers pay only here."})}
+      <div class="field wide"><label>UPI IDs <span class="muted" style="font-weight:400">(for QR codes and pay links; the name is only for you)</span></label>
+        <div id="upilist">${(upiList().length?upiList():[{id:"",label:"",upi:"",payee:""}]).map(u=>upiRowHTML(u, u.id===defaultUpiId())).join("")}</div>
+        <div class="actions" style="margin-top:8px"><button type="button" class="btn sm" data-act="upi-add">+ Add UPI ID</button></div></div>
       ${fieldHTML("s_bank","Official bank account",g("official_bank"),{hint:"Account no. and IFSC"})}
       ${fieldHTML("s_address","Business address",g("address"),{type:"textarea",wide:1})}
       ${fieldHTML("s_loc","Default handover location",g("designated_location"),{wide:1})}
@@ -2176,15 +2179,15 @@ function staffPayHTML(b, kind){
       ${kind==="pickup"&&depType(b)!=="cash"?`<dt>Security</dt><dd>${esc(depShort(b))}</dd>`:""}
       <dt class="total">To collect now</dt><dd class="total">${inr(due)}</dd>
     </dl>
-    ${due>0 && s.official_upi ? `<div class="upibox"><img class="upiqr" id="upiqr" data-qr="${esc(upiFor(b,amt||due))}" alt="UPI QR code" width="176" height="176"><div class="upiside"><div class="muted" style="font-size:13px">Customer scans this QR. Money goes to <b>${esc(s.official_upi)}</b>.</div></div></div>`:""}
-    ${due>0 && !s.official_upi ? `<p class="note">UPI ID is not set in Settings. Collect by the owner's UPI or cash.</p>`:""}
+    ${due>0 && upiList().length ? `${upiSelectHTML("sp_upi", S.upiSel?.[b.id])}<div class="upibox" style="margin-top:10px"><img class="upiqr" id="upiqr" data-qr="${esc(upiFor(b,amt||due,S.upiSel?.[b.id]))}" alt="UPI QR code" width="176" height="176"><div class="upiside"><div class="muted" style="font-size:13px">Customer scans this QR. Money goes to <b id="sp_to">${esc(upiPick(S.upiSel?.[b.id]).upi)}</b>.</div></div></div>`:""}
+    ${due>0 && !upiList().length ? `<p class="note">UPI ID is not set in Settings. Collect by the owner's UPI or cash.</p>`:""}
     ${due>0?`<div class="grid" style="margin-top:10px">
       ${selectHTML("sp_kind","For",rentDue?"payment":"deposit_in",[["payment","Rent / balance"],...(depDue?[["deposit_in","Security deposit"]]:[])])}
       ${fieldHTML("sp_amt","Amount received (₹)",amt,{type:"number",attrs:'min="1" inputmode="numeric"'})}
       ${selectHTML("sp_mode","Paid by","UPI",[["UPI","UPI"],["Cash","Cash"]])}
       ${fieldHTML("sp_ref","UPI reference (last digits)","")}
     </div><div class="actions" style="margin-top:8px"><button class="btn primary" data-act="staff-pay">Record payment received</button></div>`:`<p class="okline" style="margin:0">Nothing to collect.</p>`}
-    ${pays.length?`<div class="sphotos" style="margin-top:10px">${pays.map(p=>`<span>${esc(p.advance?"Advance":PAY_KINDS[p.kind])} ${inr(p.amount)} · ${esc(p.mode||"")}${p.by?` · ${esc(p.by)}`:""}</span>`).join("")}</div>`:""}`;
+    ${pays.length?`<div class="sphotos" style="margin-top:10px">${pays.map(p=>`<span>${esc(p.advance?"Advance":PAY_KINDS[p.kind])} ${inr(p.amount)} · ${esc(p.mode||"")}${p.to?` (${esc(p.to)})`:""}${p.by?` · ${esc(p.by)}`:""}</span>`).join("")}</div>`:""}`;
 }
 function staffTaskView(){
   const b=S.bookings.find(x=>x.id===S.selected);
@@ -2308,7 +2311,8 @@ async function staffClick(act, t, b){
       const mode=$("#sp_mode").value, ref=($("#sp_ref")?.value||"").trim();
       if(mode==="UPI" && !ref && !confirm("No UPI reference entered. Record anyway?")) return true;
       if(S.staffPayAmt) delete S.staffPayAmt[b.id];
-      await staffSave(b,{payment:{kind:$("#sp_kind").value, amount:amt, mode, ref, at:toLocalInput()}},`${inr(amt)} recorded.`); return true; }
+      const upi=upiPick($("#sp_upi")?.value||S.upiSel?.[b.id]);
+      await staffSave(b,{payment:{kind:$("#sp_kind").value, amount:amt, mode, ref, at:toLocalInput(), to: mode==="UPI"&&upi ? (upi.label||upi.upi) : ""}},`${inr(amt)} recorded.`); return true; }
     case "staff-handed": if(confirm(t.dataset.warn?`${t.dataset.warn}. Hand over the car anyway?`:"Hand over the car now?")) await staffSave(b,{status:"handed"},"Car handed over. Have a safe trip!"); return true;
     case "staff-save-return": {
       const v=readVals({odo_return:"sr_odo",fuel_return:"sr_fuel",return_at:"sr_at",return_damage:"sr_dmg"});
@@ -2350,8 +2354,19 @@ function connectDriveServer(){
     callback: async r=>{ if(r.error){ toast(r.error_description||r.error); return; } try{ const x=await staffApi({action:"drive_connect", code:r.code}); toast(`Drive connected${x.email?` (${x.email})`:""}.`); await loadDriveServer(); }catch(e){ toast(e.message); } } });
   client.requestCode();
 }
+function upiRowHTML(u, def){
+  return `<div class="upirow" data-upirow>
+    <div class="field"><label>Name (only you see it)</label><input data-k="label" value="${esc(u.label||"")}" placeholder="e.g. Business, Private"></div>
+    <div class="field"><label>UPI ID</label><input data-k="upi" value="${esc(u.upi||"")}" placeholder="name@okhdfcbank" autocapitalize="off" autocomplete="off"></div>
+    <div class="field"><label>Account holder name (optional)</label><input data-k="payee" value="${esc(u.payee||"")}" placeholder="Shown in the customer's UPI app"></div>
+    <input type="hidden" data-k="id" value="${esc(u.id||"")}">
+    <div class="upirow-act"><label class="upidef"><input type="radio" name="upi_default" ${def?"checked":""}> Default</label><button type="button" class="btn sm" data-act="upi-remove">Remove</button></div>
+  </div>`;
+}
 async function ownerStaffClick(act, t){
   switch(act){
+    case "upi-add": { const l=$("#upilist"); if(l){ l.insertAdjacentHTML("beforeend", upiRowHTML({}, !l.querySelector("[data-upirow]"))); l.lastElementChild.querySelector('[data-k="label"]').focus(); } return true; }
+    case "upi-remove": { const r=t.closest("[data-upirow]"); if(r){ const wasDef=r.querySelector('input[type="radio"]')?.checked; r.remove(); if(wasDef){ const f=document.querySelector('#upilist input[type="radio"]'); if(f) f.checked=true; } toast("Removed. Press Save settings to keep the change."); } return true; }
     case "staff-add": {
       const name=($("#st_name").value||"").trim(), mobile=($("#st_mobile").value||"").trim(), password=$("#st_pass").value||"";
       t.disabled=true;
@@ -2390,11 +2405,20 @@ function staffActivityHTML(b){
 }
 
 /* ---------- UPI payments ---------- */
-function upiFor(b, amount){ const s=S.settings; return s.official_upi ? upiLink({upi:s.official_upi, name:s.legal_name, amount, note:`${s.business_name||"DriveKaro"} ${b.id}`}) : ""; }
-function payLinkFor(b, amount){ return S.settings.official_upi && amount>0 ? payUrl(location.origin, b.id, amount) : ""; }
-function payText(b, amount){
-  const s=S.settings;
-  return [`Hello ${b.name}, please pay ${inr(amount)} for your ${s.business_name} booking ${b.id}:`, payLinkFor(b,amount), ``, `Or pay to our UPI ID: ${s.official_upi}`, `Please share the payment screenshot here. Thank you.`, ``, `${s.legal_name} · ${s.support_phone}`].join("\n");
+// Saved UPI IDs: [{id, label (private name), upi, payee}]. Older setups had one "official_upi".
+function upiList(){ const s=S.settings; const l=(s.upi_ids||[]).filter(u=>u&&u.upi); if(l.length) return l; return s.official_upi?[{id:"main",label:"Main",upi:s.official_upi,payee:""}]:[]; }
+function defaultUpiId(){ const l=upiList(); return (l.find(u=>u.id===S.settings.upi_default)||l[0]||{}).id||""; }
+function upiPick(id){ const l=upiList(); return l.find(u=>u.id===id) || l.find(u=>u.id===S.settings.upi_default) || l[0] || null; }
+function allUpisText(){ return upiList().map(u=>u.upi).join(", "); }
+function upiSelectHTML(id, selected){
+  const l=upiList(); if(l.length<2) return "";
+  return selectHTML(id,"Which UPI",selected||defaultUpiId(),l.map(u=>[u.id,`${u.label||"UPI"} · ${u.upi}`]));
+}
+function upiFor(b, amount, id){ const s=S.settings, u=upiPick(id); return u ? upiLink({upi:u.upi, name:u.payee||s.legal_name, amount, note:`${s.business_name||"DriveKaro"} ${b.id}`}) : ""; }
+function payLinkFor(b, amount, id){ const u=upiPick(id); if(!u || !(amount>0)) return ""; return payUrl(location.origin, b.id, amount) + (u.id!==defaultUpiId() ? `&u=${encodeURIComponent(u.id)}` : ""); }
+function payText(b, amount, id){
+  const s=S.settings, u=upiPick(id);
+  return [`Hello ${b.name}, please pay ${inr(amount)} for your ${s.business_name} booking ${b.id}:`, payLinkFor(b,amount,id), ``, `Or pay to our UPI ID: ${u?u.upi:""}`, `Please share the payment screenshot here. Thank you.`, ``, `${s.legal_name} · ${s.support_phone}`].join("\n");
 }
 function fillQRs(){
   document.querySelectorAll("img[data-qr]:not([data-done])").forEach(img=>{
@@ -2404,15 +2428,16 @@ function fillQRs(){
 }
 function upiCardHTML(b){
   const s=S.settings;
-  if(!s.official_upi) return `<section class="pcard"><h3>Collect by UPI</h3><p class="note" style="margin:0 0 10px">Add your official UPI ID in Settings to show a payment QR here, on invoices and in WhatsApp messages.</p><button class="btn sm" data-act="goto-settings">Open Settings</button></section>`;
-  const due=dueNow(b,s); const amt=S.upiAmt?.[b.id] ?? due;
+  if(!upiList().length) return `<section class="pcard"><h3>Collect by UPI</h3><p class="note" style="margin:0 0 10px">Add your official UPI ID in Settings to show a payment QR here, on invoices and in WhatsApp messages.</p><button class="btn sm" data-act="goto-settings">Open Settings</button></section>`;
+  const due=dueNow(b,s); const amt=S.upiAmt?.[b.id] ?? due; const sel=S.upiSel?.[b.id]||defaultUpiId(); const cur=upiPick(sel);
   return `<section class="pcard"><h3>Collect by UPI</h3>
-    <div class="upibox">
-      <img class="upiqr" id="upiqr" data-qr="${esc(upiFor(b,amt))}" alt="UPI QR code for ${esc(inr(amt))}" width="176" height="176">
+    ${upiSelectHTML("u_upi", sel)}
+    <div class="upibox" style="margin-top:10px">
+      <img class="upiqr" id="upiqr" data-qr="${esc(upiFor(b,amt,sel))}" alt="UPI QR code for ${esc(inr(amt))}" width="176" height="176">
       <div class="upiside">
         ${fieldHTML("u_amt","Amount (₹)",amt||"",{type:"number",attrs:'min="1" inputmode="numeric"',hint:due>0?`Due now: ${inr(due)}${["draft","ready","sent","signed"].includes(b.status)&&depCash(b)?" (incl. deposit)":""}`:"Nothing due right now"})}
-        <div class="muted" style="font-size:13px;margin:8px 0 10px">Customer scans this QR at the counter, or you send the link. Pays to <b>${esc(s.official_upi)}</b> with note “${esc(`${s.business_name||"DriveKaro"} ${b.id}`)}”.</div>
-        <div class="actions">${waHref(b.phone,"x")?`<a class="btn sm primary wa" id="u_wa" href="${esc(waHref(b.phone,payText(b,amt)))}" target="_blank" rel="noopener">Send pay link on WhatsApp</a>`:""}<button class="btn sm" data-act="copy-paylink">Copy link</button></div>
+        <div class="muted" style="font-size:13px;margin:8px 0 10px">Customer scans this QR at the counter, or you send the link. Pays to <b id="u_to">${esc(cur.upi)}</b> with note “${esc(`${s.business_name||"DriveKaro"} ${b.id}`)}”.</div>
+        <div class="actions">${waHref(b.phone,"x")?`<a class="btn sm primary wa" id="u_wa" href="${esc(waHref(b.phone,payText(b,amt,sel)))}" target="_blank" rel="noopener">Send pay link on WhatsApp</a>`:""}<button class="btn sm" data-act="copy-paylink">Copy link</button></div>
       </div>
     </div>
     <p class="note" style="margin:12px 0 0">After the money arrives, record it above in “Record a payment”.</p>
@@ -2421,8 +2446,10 @@ function upiCardHTML(b){
 function onUpiAmount(){
   const b=S.bookings.find(x=>x.id===S.selected); if(!b) return;
   const amt=Math.round(Number($("#u_amt").value)||0); S.upiAmt={...(S.upiAmt||{}), [b.id]:amt};
-  const img=$("#upiqr"); if(img && amt>0){ img.dataset.qr=upiFor(b,amt); delete img.dataset.done; fillQRs(); }
-  const a=$("#u_wa"); if(a && amt>0) a.href=waHref(b.phone,payText(b,amt));
+  const sel=$("#u_upi")?.value||defaultUpiId(); S.upiSel={...(S.upiSel||{}), [b.id]:sel};
+  const img=$("#upiqr"); if(img && amt>0){ img.dataset.qr=upiFor(b,amt,sel); delete img.dataset.done; fillQRs(); }
+  const a=$("#u_wa"); if(a && amt>0) a.href=waHref(b.phone,payText(b,amt,sel));
+  const to=$("#u_to"); if(to) to.textContent=upiPick(sel)?.upi||"";
 }
 async function qrDataUrl(text){ try{ return await QRCode.toDataURL(text,{margin:1,width:400,errorCorrectionLevel:"M"}); }catch(e){ return null; } }
 
@@ -2568,7 +2595,7 @@ function extText(b, e){
     `Extension charges: ${e.days&&e.amount===e.days*e.rate?`${e.days} day${e.days>1?"s":""} × ${inr(e.rate)} = `:""}${inr(e.amount)}`,
     e.km?`Extra km allowance: ${e.km} km`:"", L.balance>0?`Balance now due: ${inr(L.balance)}`:"",
     ``, `This extension is confirmed under clause 2.5 of your rental agreement ${b.id}. All its terms continue to apply until the new drop-off. Please reply "I agree" to confirm.`,
-    L.balance>0 && s.official_upi?`Please pay only to our UPI ID: ${s.official_upi}`:"", ``, `${s.legal_name} · ${s.support_phone}`].filter((l,i,a)=>l!==""||(a[i-1]!==""&&i>0)).join("\n");
+    L.balance>0 && upiList().length?`Please pay only to our UPI ID${upiList().length>1?"s":""}: ${allUpisText()}`:"", ``, `${s.legal_name} · ${s.support_phone}`].filter((l,i,a)=>l!==""||(a[i-1]!==""&&i>0)).join("\n");
 }
 function extFormHTML(b){
   const def=toLocalInput(new Date(new Date(b.drop).getTime()+864e5));
@@ -2624,7 +2651,7 @@ function addendumPdf(b, e){
   rows.forEach(([k,v],i)=>{ if(i%2===0){ doc.setFillColor(244,241,236); doc.rect(M,y-4.3,CW,6.6,"F"); } doc.setFont("helvetica","bold"); t(k,M+2,y); doc.setFont("helvetica","normal"); t(v,M+72,y); y+=6.6; });
   y+=5;
   [`1. At the Hirer's request, DriveKaro extends the Booking Period under clause 2.5 of the Agreement. The Booking Period now ends at the New End Time stated above.`,
-   `2. The Hirer shall pay the extension charges to DriveKaro's official UPI ID or bank account${s.official_upi?` (UPI ${s.official_upi})`:""} on or before the End Time before this Addendum, unless DriveKaro agrees otherwise in writing.`,
+   `2. The Hirer shall pay the extension charges to DriveKaro's official UPI ID or bank account${upiList().length?` (UPI ${allUpisText()})`:""} on or before the End Time before this Addendum, unless DriveKaro agrees otherwise in writing.`,
    `3. All other terms of the Agreement, including the charges in Schedule III, the Damage Limit, and the insurance, liability, tracking and dispute resolution clauses, apply to the extended Booking Period. Late return charges apply from the New End Time.`,
    `4. The Hirer accepts this Addendum by confirming it in reply on WhatsApp or by paying the extension charges. The Parties agree that either is a valid acceptance in electronic form under section 10A of the Information Technology Act, 2000.`
   ].forEach(p=>para(p));
@@ -2963,7 +2990,7 @@ document.addEventListener("click", async e=>{
     case "op-pay": { S.opOpen=b.id; const amt=Number($("#o_amt")?.value); if(!(amt>0)){ toast("Enter the amount paid to the operator."); break; } const p={id:"o"+Date.now().toString(36), amount:amt, mode:$("#o_mode").value, ref:$("#o_ref").value.trim(), at:$("#o_at").value||toLocalInput()}; if(await patchBooking(b,{op_payouts:[...(b.op_payouts||[]),p]})) toast(`Payment ${inr(amt)} to operator recorded.`); break; }
     case "op-del-pay": { S.opOpen=b.id; if(await patchBooking(b,{op_payouts:(b.op_payouts||[]).filter(p=>p.id!==t.dataset.id)})) toast("Removed."); break; }
     case "goto-settings": S.view="settings"; S.selected=null; render(); window.scrollTo(0,0); break;
-    case "copy-paylink": { const amt=Math.round(Number($("#u_amt")?.value)||0); if(amt>0) copy(payLinkFor(b,amt),"Payment link copied."); else toast("Enter an amount first."); break; }
+    case "copy-paylink": { const amt=Math.round(Number($("#u_amt")?.value)||0); if(amt>0) copy(payLinkFor(b,amt,$("#u_upi")?.value),"Payment link copied."); else toast("Enter an amount first."); break; }
     case "review-skip": { const x=S.bookings.find(y=>y.id===t.dataset.id); if(x && await patchBooking(x,{reminders:{...(x.reminders||{}), review:"skipped"}})) toast("Removed from the list."); break; }
     case "svc-done": { const c=S.fleet.find(x=>x.id===t.dataset.car); if(!c) break; const doc={...c, service_km:Number(t.dataset.km), service_date:ymd(new Date())}; if(await write("fleet/"+c.id,doc)){ localUpsert(S.fleet,doc); render(); toast("Service recorded. Add the bill in Revenue → + Add expense."); } break; }
     case "test-summary": {
@@ -3071,7 +3098,8 @@ document.addEventListener("click", async e=>{
       const amt=Number($("#p_amount").value); const errBox=$("#payerr");
       if(!(amt>0)){ errBox.innerHTML=`<div class="err" style="margin-top:8px">Enter an amount above zero.</div>`; $("#p_amount").setAttribute("aria-invalid","true"); break; }
       const at=$("#p_at").value||toLocalInput();
-      const entry={id:"p"+Date.now().toString(36), kind:$("#p_kind").value, amount:amt, mode:$("#p_mode").value, ref:$("#p_ref").value.trim(), at};
+      const toU=$("#p_mode").value==="UPI" ? upiPick($("#p_to")?.value||defaultUpiId()) : null;
+      const entry={id:"p"+Date.now().toString(36), kind:$("#p_kind").value, amount:amt, mode:$("#p_mode").value, ref:$("#p_ref").value.trim(), at, ...(toU&&upiList().length>1?{to:toU.label||toU.upi}:{})};
       const patch={payments:[...(b.payments||[]), entry]};
       if(entry.kind==="payment" && !b.paymode){ patch.paymode=entry.mode; patch.payref=entry.ref; }
       if(await patchBooking(b,patch)) toast(`${PAY_KINDS[entry.kind]}: ${inr(amt)} recorded.`);
@@ -3101,7 +3129,7 @@ document.addEventListener("click", async e=>{
       break; }
     case "inv-pdf": {
       if(!b||!S.downloads) break;
-      try{ const L0=ledger(b); const qr=L0.balance>0&&S.settings.official_upi?await qrDataUrl(upiFor(b,L0.balance)):null; const blob=invoicePdf(b, qr); const safe=(b.invoice?.no||b.id).replace(/[^a-z0-9]+/gi,"-"); await S.downloads.save({filename:`DriveKaro-Invoice-${safe}.pdf`, data:blob}); }
+      try{ const L0=ledger(b); const qr=L0.balance>0&&upiList().length?await qrDataUrl(upiFor(b,L0.balance)):null; const blob=invoicePdf(b, qr); const safe=(b.invoice?.no||b.id).replace(/[^a-z0-9]+/gi,"-"); await S.downloads.save({filename:`DriveKaro-Invoice-${safe}.pdf`, data:blob}); }
       catch(err){ if(err && err.code==="declined") return; toast("Couldn't save the PDF here. Use Copy text instead."); }
       break; }
     case "copy-invoice": if(b) copy(invoiceText(b),"Invoice text copied."); break;
@@ -3144,7 +3172,8 @@ document.addEventListener("input", e=>{
   if(e.target.id==="e_drop") updateExtInfo();
   if(e.target.id==="e_amount") delete e.target.dataset.auto;
   if(e.target.id==="u_amt") onUpiAmount();
-  if(e.target.id==="sp_amt"){ const b=S.bookings.find(x=>x.id===S.selected); const amt=Math.round(Number(e.target.value)||0); if(b){ S.staffPayAmt={...(S.staffPayAmt||{}), [b.id]:amt}; const img=$("#upiqr"); if(img && amt>0){ img.dataset.qr=upiFor(b,amt); delete img.dataset.done; fillQRs(); } } }
+  if(e.target.id==="sp_upi" || e.target.id==="u_upi"){ const b=S.bookings.find(x=>x.id===S.selected); if(b){ S.upiSel={...(S.upiSel||{}), [b.id]:e.target.value}; if(e.target.id==="u_upi") onUpiAmount(); else { const img=$("#upiqr"); const amt=Number($("#sp_amt")?.value)||dueNow(b,S.settings); if(img){ img.dataset.qr=upiFor(b,amt,e.target.value); delete img.dataset.done; fillQRs(); } const to=$("#sp_to"); if(to) to.textContent=upiPick(e.target.value)?.upi||""; } } return; }
+  if(e.target.id==="sp_amt"){ const b=S.bookings.find(x=>x.id===S.selected); const amt=Math.round(Number(e.target.value)||0); if(b){ S.staffPayAmt={...(S.staffPayAmt||{}), [b.id]:amt}; const img=$("#upiqr"); if(img && amt>0){ img.dataset.qr=upiFor(b,amt,S.upiSel?.[b.id]); delete img.dataset.done; fillQRs(); } } }
   if(e.target.id==="q_phone") quickCustNote();
   if(e.target.closest("#qform") && e.target.getAttribute("aria-invalid")){ e.target.removeAttribute("aria-invalid"); e.target.parentElement.querySelector(".err")?.remove(); }
   if(e.target.closest("#qform")) qSummary();
@@ -3207,10 +3236,13 @@ document.addEventListener("submit", async e=>{
   else if(e.target.id==="sform"){
     const v=id=>($("#"+id)?.value??"").trim(); const n=id=>Number(v(id))||0;
     const doc={...S.settings, legal_name:v("s_legal")||DEFAULT_SETTINGS.legal_name, signatory:v("s_sign"), shop_act:v("s_shop"), udyam:v("s_udyam"),
-      support_phone:v("s_phone"), support_email:v("s_email"), grievance_email:v("s_griev"), official_upi:v("s_upi"), official_bank:v("s_bank"), address:v("s_address"), designated_location:v("s_loc"),
+      support_phone:v("s_phone"), support_email:v("s_email"), grievance_email:v("s_griev"), official_bank:v("s_bank"), address:v("s_address"), designated_location:v("s_loc"),
       non_return_hours:n("s_nonret"), unreachable_hours:n("s_unreach"), return_inspection_hours:n("s_retinsp"), emergency_repair_limit:n("s_repair"), late_interest:n("s_interest"), tracking_retention_days:n("s_track"), fast_track_limit:n("s_fast"),
       min_age:n("s_age"), min_age_premium:n("s_age2"), dl_min_months:n("s_dlm"), charges:readCharges("sc_"),
       google_review:v("s_review"), pickup_map_link:v("s_map"), owner_whatsapp:v("s_ownwa"), summary_email:v("s_sumemail")};
+    const rows=[...document.querySelectorAll("[data-upirow]")].map(r=>{ const q=k=>(r.querySelector(`[data-k="${k}"]`)?.value||"").trim(); return {id:q("id")||("u"+Math.random().toString(36).slice(2,8)), label:q("label"), upi:q("upi").replace(/\s+/g,""), payee:q("payee"), def:!!r.querySelector('input[type="radio"]')?.checked}; }).filter(u=>u.upi);
+    const badUpi=rows.find(u=>!/^[\w.\-]{2,}@[\w.\-]{2,}$/.test(u.upi)); if(badUpi){ toast(`"${badUpi.upi}" doesn't look like a UPI ID (name@bank).`); return; }
+    doc.upi_ids=rows.map(({def,...u})=>u); doc.upi_default=(rows.find(u=>u.def)||rows[0]||{}).id||""; doc.official_upi=(rows.find(u=>u.def)||rows[0]||{}).upi||"";
     if(!(await write("settings/business",doc))) return;
     S.settings=doc; toast("Settings saved.");
   }

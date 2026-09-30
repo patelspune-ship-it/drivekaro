@@ -57,7 +57,7 @@ export function applyStaffPatch(b, input, who, now = new Date().toISOString()) {
     if (!['payment', 'deposit_in'].includes(p.kind)) throw new HttpError(400, 'Staff can record rent or deposit payments only.');
     if (!(amt > 0 && amt <= 500000)) throw new HttpError(400, 'Enter a valid amount.');
     const mode = PAYMODES.includes(p.mode) ? p.mode : 'UPI';
-    next.payments = [...(b.payments || []), { id: 'p' + Date.now().toString(36), kind: p.kind, amount: amt, mode, ref: clip(p.ref, 60), at: clip(p.at, 20) || now.slice(0, 16), by: who.name }];
+    next.payments = [...(b.payments || []), { id: 'p' + Date.now().toString(36), kind: p.kind, amount: amt, mode, ref: clip(p.ref, 60), at: clip(p.at, 20) || now.slice(0, 16), by: who.name, ...(p.to ? { to: clip(p.to, 40) } : {}) }];
     log.push(`${p.kind === 'deposit_in' ? 'deposit' : 'payment'} ${amt} ${mode}`);
   }
   if (input.extra) {
