@@ -1768,7 +1768,7 @@ async function removeDoc(c, fileId){
 }
 
 /* ---------- security deposit ---------- */
-const DEP_TYPES=[["cash","Cash / UPI"],["bike","Bike"],["document","Document"]];
+const DEP_TYPES=[["cash","Cash / UPI amount"],["bike","Bike (two-wheeler)"],["document","Document (ID card etc.)"]];
 const DEP_DOCS=["Office ID card","College ID card","Voter ID","PAN card","Other"];
 function depType(b){ return b.deposit_type||"cash"; }
 function depCash(b){ return depType(b)==="cash" ? (Number(b.deposit)||0) : 0; }
@@ -1788,7 +1788,7 @@ function depShort(b){
 }
 function depFieldsHTML(g, errs){
   const t=g("deposit_type")||"cash";
-  return `${selectHTML("f_deptype","Security deposit",t,DEP_TYPES)}
+  return `${selectHTML("f_deptype","Security deposit type",t,DEP_TYPES,{hint:"Cash, a bike or a document"})}
     <div class="field depf" data-dep="cash" ${t==="cash"?"":"hidden"}><label for="f_deposit">Deposit amount (₹)</label><input id="f_deposit" type="number" value="${esc(g("deposit"))}" min="0" step="500" inputmode="numeric" ${errs.deposit?'aria-invalid="true"':""}>${errs.deposit?`<span class="err">${esc(errs.deposit)}</span>`:`<span class="hint">Fills from the car.</span>`}</div>
     <div class="field depf" data-dep="bike" ${t==="bike"?"":"hidden"}><label for="f_depbike">Bike number</label><input id="f_depbike" value="${esc(g("dep_bike_no"))}" placeholder="MH12 AB 1234" style="text-transform:uppercase" ${errs.dep_bike_no?'aria-invalid="true"':""}>${errs.dep_bike_no?`<span class="err">${esc(errs.dep_bike_no)}</span>`:""}</div>
     <div class="field depf" data-dep="bike" ${t==="bike"?"":"hidden"}><label for="f_depbikemodel">Bike make and model</label><input id="f_depbikemodel" value="${esc(g("dep_bike_model"))}" placeholder="Honda Activa"></div>
@@ -1845,13 +1845,13 @@ function confirmText(b){
   return lines.filter(l=>l!==null).join("\n");
 }
 function quickTotals(q){
-  const b={pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, deposit_type:"cash", pickup_mode:q.pickup_mode, pickup_charge:q.pickup_charge, drop_mode:q.drop_mode, drop_charge:q.drop_charge};
+  const b={pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, deposit_type:q.deposit_type||"cash", pickup_mode:q.pickup_mode, pickup_charge:q.pickup_charge, drop_mode:q.drop_mode, drop_charge:q.drop_charge};
   const c=calc(b); const adv=q.adv==="yes"?(Number(q.adv_amt)||0):0;
   return {c, adv, total:c.rental+c.delivery+c.deposit, balance:Math.max(0,c.rental+c.delivery+c.deposit-adv)};
 }
 function readQuick(){
   const v=id=>($("#"+id)?.value??"").trim();
-  return {phone:v("q_phone"), name:v("q_name"), car_id:v("f_car"), pickup:v("f_pickup"), drop:v("f_drop"), rate:v("f_rate"), deposit:v("f_deposit"), adv:v("q_adv"), adv_amt:v("q_advamt"), adv_mode:v("q_advmode"), adv_ref:v("q_advref"), trip_to:v("q_tripto"), trip_type:v("q_triptype")||"SELF", operator_name:v("q_triptype")==="OPERATOR"?v("q_operator"):"", ...readDoorstep("q_")};
+  return {phone:v("q_phone"), name:v("q_name"), car_id:v("f_car"), pickup:v("f_pickup"), drop:v("f_drop"), rate:v("f_rate"), deposit:v("f_deposit"), adv:v("q_adv"), adv_amt:v("q_advamt"), adv_mode:v("q_advmode"), adv_ref:v("q_advref"), trip_to:v("q_tripto"), trip_type:v("q_triptype")||"SELF", operator_name:v("q_triptype")==="OPERATOR"?v("q_operator"):"", ...readDoorstep("q_"), deposit_type:v("f_deptype")||"cash", dep_bike_no:v("f_depbike").toUpperCase(), dep_bike_model:v("f_depbikemodel"), dep_doc_type:v("f_depdoc"), dep_doc_details:v("f_depdocdet")};
 }
 function viewQuick(errs={}){
   const q=S.quick||{adv:"yes", adv_mode:"UPI"}; const g=k=>q[k]??"";
@@ -1875,7 +1875,7 @@ function viewQuick(errs={}){
     <fieldset><legend>Pickup and drop</legend><div class="grid">${doorstepFieldsHTML("q_", q)}</div></fieldset>
     <fieldset><legend>Amount</legend><div class="grid">
       ${fieldHTML("f_rate","Rent per day (₹)",g("rate"),{type:"number",req:1,err:errs.rate,attrs:'min="0" inputmode="numeric"'})}
-      ${fieldHTML("f_deposit","Security deposit (₹)",g("deposit"),{type:"number",attrs:'min="0" inputmode="numeric"',hint:"Refundable. Change the type later if you take a bike or document."})}
+      ${depFieldsHTML(g, errs)}
       ${selectHTML("q_adv","Advance received?",g("adv")||"yes",[["yes","Yes"],["no","No, not yet"]])}
       <div class="field qadvf" ${hide}><label for="q_advamt">Advance amount (₹) <em>*</em></label><input id="q_advamt" type="number" min="1" inputmode="numeric" value="${esc(g("adv_amt"))}" ${errs.adv?'aria-invalid="true"':""}>${errs.adv?`<span class="err">${esc(errs.adv)}</span>`:""}</div>
       <div class="field qadvf" ${hide}><label for="q_advmode">Paid by</label><select id="q_advmode">${PAYMODES.map(m=>`<option ${m===(g("adv_mode")||"UPI")?"selected":""}>${m}</option>`).join("")}</select></div>
@@ -1894,7 +1894,7 @@ function qSummary(){
   box.innerHTML=`<dl class="kv num">
     <dt>Rent</dt><dd>${c.days} day${c.days===1?"":"s"} × ${inr(q.rate)} = ${inr(c.rental)}</dd>
     ${c.delivery?`<dt>Pickup / drop charges</dt><dd>${inr(c.delivery)}</dd>`:""}
-    <dt>Security deposit</dt><dd>${inr(c.deposit)}</dd>
+    <dt>Security deposit</dt><dd>${(q.deposit_type||"cash")==="cash"?inr(c.deposit):esc(depShort(q))}</dd>
     <dt>Advance paid</dt><dd>− ${inr(T.adv)}</dd>
     <dt class="total">Balance at pickup</dt><dd class="total">${inr(T.balance)}</dd>
   </dl>${night.length?`<p class="note" style="margin:8px 0 0">Night charge ${money({},"night_charge")} applies (${night.join(" and ")} between 1 and 5 AM). Add it at return in Payments.</p>`:""}`;
@@ -1923,7 +1923,7 @@ async function saveQuick(){
   const kyc={}; if(existing) for(const k of KYC_FIELDS) if(existing[k]) kyc[k]=existing[k];
   const doc={...kyc, id, status:"confirmed", name:q.name||existing?.name||"", phone:fmtPhone(q.phone), customer_id:cust?.id||"",
     car_id:q.car_id, car_snapshot:carSnapshot(car), trip_to:q.trip_to, trip_type:car?.ownership==="operator"?"OPERATOR":q.trip_type, operator_name:car?.ownership==="operator"?(q.operator_name||car.operator_name||""):q.operator_name,
-    pickup_mode:q.pickup_mode, pickup_address:q.pickup_address, pickup_charge:q.pickup_charge, drop_mode:q.drop_mode, drop_address:q.drop_address, drop_charge:q.drop_charge, pickup:q.pickup, drop:q.drop, rate:Number(q.rate), deposit:Number(q.deposit)||0, deposit_type:"cash",
+    pickup_mode:q.pickup_mode, pickup_address:q.pickup_address, pickup_charge:q.pickup_charge, drop_mode:q.drop_mode, drop_address:q.drop_address, drop_charge:q.drop_charge, pickup:q.pickup, drop:q.drop, rate:Number(q.rate), deposit:(q.deposit_type||"cash")==="cash"?(Number(q.deposit)||0):"", deposit_type:q.deposit_type||"cash", dep_bike_no:q.dep_bike_no, dep_bike_model:q.dep_bike_model, dep_doc_type:q.dep_doc_type, dep_doc_details:q.dep_doc_details,
     charges:defaultCharges(), payments: q.adv==="yes" ? [{id:"p"+Date.now().toString(36), kind:"payment", advance:true, amount:Number(q.adv_amt), mode:q.adv_mode||"UPI", ref:q.adv_ref, at:toLocalInput()}] : [],
     created_at:now, updated_at:now, confirmed_at:now, agreement_date:toLocalInput().slice(0,10), template_version:"2.0", quick:true};
   if(!(await write("bookings/"+id, doc))) return;
@@ -2654,7 +2654,7 @@ document.addEventListener("click", async e=>{
   switch(act){
     case "new": S.editId=null; S.draft=null; S.view="new"; render(); break;
     case "quick": S.editId=null; S.quick=null; S.view="quick"; S.selected=null; render(); window.scrollTo(0,0); $("#q_phone")?.focus(); break;
-    case "new-full": { const q=readQuick(); S.editId=null; S.draft={pickup_mode:q.pickup_mode, pickup_address:q.pickup_address, pickup_charge:q.pickup_charge, drop_mode:q.drop_mode, drop_address:q.drop_address, drop_charge:q.drop_charge, trip_to:q.trip_to, trip_type:q.trip_type, operator_name:q.operator_name, phone:q.phone, name:q.name, car_id:q.car_id, pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, adv_yes:q.adv, adv_amt:q.adv_amt, adv_mode:q.adv_mode, adv_ref:q.adv_ref}; S.view="new"; render(); window.scrollTo(0,0); break; }
+    case "new-full": { const q=readQuick(); S.editId=null; S.draft={deposit_type:q.deposit_type, dep_bike_no:q.dep_bike_no, dep_bike_model:q.dep_bike_model, dep_doc_type:q.dep_doc_type, dep_doc_details:q.dep_doc_details, pickup_mode:q.pickup_mode, pickup_address:q.pickup_address, pickup_charge:q.pickup_charge, drop_mode:q.drop_mode, drop_address:q.drop_address, drop_charge:q.drop_charge, trip_to:q.trip_to, trip_type:q.trip_type, operator_name:q.operator_name, phone:q.phone, name:q.name, car_id:q.car_id, pickup:q.pickup, drop:q.drop, rate:q.rate, deposit:q.deposit, adv_yes:q.adv, adv_amt:q.adv_amt, adv_mode:q.adv_mode, adv_ref:q.adv_ref}; S.view="new"; render(); window.scrollTo(0,0); break; }
     case "op-save-com": { S.opOpen=b.id; const v=($("#o_com")?.value??"").trim(); if(v!=="" && !(Number(v)>=0)){ toast("Enter a valid amount."); break; } if(await patchBooking(b,{commission: v===""?"":Number(v)})) toast(v===""?"Commission cleared.":`Commission ${inr(v)} saved.`); break; }
     case "op-pay": { S.opOpen=b.id; const amt=Number($("#o_amt")?.value); if(!(amt>0)){ toast("Enter the amount paid to the operator."); break; } const p={id:"o"+Date.now().toString(36), amount:amt, mode:$("#o_mode").value, ref:$("#o_ref").value.trim(), at:$("#o_at").value||toLocalInput()}; if(await patchBooking(b,{op_payouts:[...(b.op_payouts||[]),p]})) toast(`Payment ${inr(amt)} to operator recorded.`); break; }
     case "op-del-pay": { S.opOpen=b.id; if(await patchBooking(b,{op_payouts:(b.op_payouts||[]).filter(p=>p.id!==t.dataset.id)})) toast("Removed."); break; }
