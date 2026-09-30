@@ -153,21 +153,33 @@ async function download(p, format) {
   a.href = URL.createObjectURL(blob); a.download = `drivekaro-${p.date}-${p.type}-${format}.jpg`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 async function shrink(file, max = 2000) {
-  const url = URL.createObjectURL(file); const im = await loadImage(url);
-  if (!im) throw new Error(`${file.name} is not an image I can read (use JPG or PNG).`);
+  const heic = /\.(heic|heif)$/i.test(file.name) || /hei[cf]/i.test(file.type);
+  const url = URL.createObjectURL(file);
+  let im = null;
+  try { im = await new Promise(res => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = url; }); } finally { /* revoked below */ }
+  if (!im || !im.naturalWidth) { URL.revokeObjectURL(url); throw new Error(heic ? 'iPhone HEIC photo: this browser cannot read it. On iPhone go to Settings → Camera → Formats → Most Compatible, or upload from the iPhone itself, or send it as JPG.' : 'Not a photo this browser can read. Use JPG or PNG.'); }
   const s = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight)); const c = document.createElement('canvas');
   c.width = Math.round(im.naturalWidth * s); c.height = Math.round(im.naturalHeight * s); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-  URL.revokeObjectURL(url); return { blob: await canvasToBlob(c, 'image/jpeg', 0.88), w: c.width, h: c.height };
+  URL.revokeObjectURL(url);
+  const blob = await canvasToBlob(c, 'image/jpeg', 0.88);
+  if (!blob) throw new Error('Could not shrink this photo. Try a smaller one.');
+  return { blob, w: c.width, h: c.height };
 }
 async function uploadPhotos(files, car_id, kind) {
+  const log = M.upLog = files.map(f => ({ name: f.name, state: 'waiting', msg: '' }));
   let n = 0;
-  for (const f of files) {
-    const { blob, w, h } = await shrink(f); const id = uid('ph'); const path = `photos/${id}.jpg`;
-    const url = await uploadBlob(path, blob);
-    await save('mk_photos/' + id, { url, path, car_id: car_id || null, kind: kind || 'car', w, h, name: f.name.slice(0, 80), created_at: new Date().toISOString() });
-    n++;
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i]; log[i].state = 'working'; render();
+    try {
+      const { blob, w, h } = await shrink(f); const id = uid('ph'); const path = `photos/${id}.jpg`;
+      const url = await uploadBlob(path, blob);
+      try { await M.db.doc('mk_photos/' + id).set({ url, path, car_id: car_id || null, kind: kind || 'car', w, h, name: f.name.slice(0, 80), created_at: new Date().toISOString() }); }
+      catch (e) { throw new Error('Photo uploaded but not saved to the list: ' + (e.message || e)); }
+      log[i].state = 'ok'; n++;
+    } catch (e) { log[i].state = 'bad'; log[i].msg = e.message || String(e); console.error('upload', f.name, e); }
   }
-  toast(`${n} photo${n > 1 ? 's' : ''} added.`);
+  toast(n === files.length ? `${n} photo${n > 1 ? 's' : ''} added.` : `${n} of ${files.length} added. See the errors under Upload.`);
+  if (n === files.length) setTimeout(() => { if (M.upLog === log) { M.upLog = null; softRender(); } }, 6000);
 }
 
 /* ---------- render ---------- */
@@ -317,7 +329,8 @@ function photosHTML() {
     <div class="two"><div class="field"><label>Which car</label><select id="up_car"><option value="">Not a specific car</option>${cs.map(c => `<option value="${esc(c.id)}">${esc(c.make_model)} · ${esc(c.plate || '')}</option>`).join('')}</select></div>
     <div class="field"><label>What's in it</label><select id="up_kind"><option value="car">Car</option><option value="place">Place / road trip</option><option value="people">Happy customers</option></select></div></div>
     <input type="file" id="up_files" accept="image/*" multiple>
-    <div class="actions"><button class="btn primary" data-act="upload" ${M.busy.has('upload') ? 'disabled' : ''}>${M.busy.has('upload') ? 'Uploading…' : 'Upload'}</button></div></div>
+    <div class="actions"><button class="btn primary" data-act="upload" ${M.busy.has('upload') ? 'disabled' : ''}>${M.busy.has('upload') ? 'Uploading…' : 'Upload'}</button></div>
+    ${M.upLog ? `<div class="uplog">${M.upLog.map(l => `<div class="small ${l.state === 'bad' ? 'err' : l.state === 'ok' ? 'okt' : 'muted'}">${l.state === 'ok' ? '✓' : l.state === 'bad' ? '✗' : l.state === 'working' ? '…' : '·'} ${esc(l.name)}${l.msg ? ': ' + esc(l.msg) : l.state === 'working' ? ' uploading' : ''}</div>`).join('')}</div>` : ''}</div>
   <div class="card"><h3>Your photos (${M.photos.length})</h3>
   ${M.photos.length ? `<div class="gallery">${M.photos.map(ph => `<figure><img src="${esc(ph.url)}" alt="" loading="lazy"><figcaption><select data-phcar="${esc(ph.id)}"><option value="">Any</option>${cs.map(c => `<option value="${esc(c.id)}" ${ph.car_id === c.id ? 'selected' : ''}>${esc(c.make_model)}</option>`).join('')}</select><select data-phkind="${esc(ph.id)}">${['car', 'place', 'people'].map(k => `<option ${ph.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select><button class="btn sm danger" data-act="ph-del" data-id="${esc(ph.id)}">Delete</button></figcaption></figure>`).join('')}</div>` : `<p class="muted">No photos yet. Posts use designed backgrounds until you add some.</p>`}</div>`;
 }
