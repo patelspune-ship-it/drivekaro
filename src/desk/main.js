@@ -75,7 +75,7 @@ const IDTYPES = ["Aadhaar (masked)","Passport","Voter ID","PAN"];
 
 /* ---------- state ---------- */
 const S = {
-  fleet:[], bookings:[], customers:[], expenses:[], calMode:"week", custView:null, custEdit:null, custQuery:"", confirmDoc:null, confirmCustDel:null, formCust:null, webMatches:[], settings:JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
+  fleet:[], bookings:[], customers:[], expenses:[], staff:[], calMode:"week", custView:null, custEdit:null, custQuery:"", confirmDoc:null, confirmCustDel:null, formCust:null, webMatches:[], settings:JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
   view:"bookings", selected:null, filter:"active",
   editId:null, draft:null, carEdit:null, carView:null, detailTab:"agreement", confirmPay:null, confirmSettle:false, confirmDelete:null, confirmCar:null,
   db:null, dbState:"loading", downloads:null
@@ -134,7 +134,10 @@ async function isOwner(email){
 }
 let started=false;
 async function startDesk(session){
-  if(!(await isOwner(session.user.email))){ await supabase.auth.signOut(); showGate("This account is not in the owners list."); return; }
+  if(!(await isOwner(session.user.email))){
+    try{ const me=await api("/api/staff",{action:"me"}); if(me.role==="staff"){ $("#gate").hidden=true; $("#app").hidden=false; if(started) return; started=true; await startStaff(me.name); return; } }catch(e){}
+    await supabase.auth.signOut(); showGate("This account is not allowed to use the desk."); return;
+  }
   $("#gate").hidden=true; $("#app").hidden=false;
   if(started) return; started=true;
   S.downloads=fileSaver;
@@ -144,6 +147,7 @@ async function startDesk(session){
   db.collection("fleet").onSnapshot(snap=>{ setBanner(""); S.fleet = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.make_model||"").localeCompare(b.make_model||"")); softRender(); }, onErr);
   db.collection("bookings").onSnapshot(snap=>{ S.bookings = snap.docs.map(d=>({id:d.id,...d.data()})); S._bkLoaded=true; softRender(); syncCustomersFromBookings(); }, onErr);
   db.collection("customers").onSnapshot(snap=>{ S.customers = snap.docs.map(d=>({id:d.id,...d.data()})); S._custLoaded=true; softRender(); syncCustomersFromBookings(); }, onErr);
+  db.collection("staff").onSnapshot(snap=>{ S.staff = snap.docs.map(d=>({id:d.id,...d.data()})); if(S.view!=="settings") softRender(); }, onErr);
   db.collection("expenses").onSnapshot(snap=>{ S.expenses = snap.docs.map(d=>({id:d.id,...d.data()})); softRender(); }, onErr);
   preloadDrive();
   db.doc("settings/business").onSnapshot(snap=>{ const d=snap.exists? snap.data():{}; S.settings = {...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), ...d, charges:{...DEFAULT_CHARGES, ...(d.charges||{})}};
@@ -152,7 +156,7 @@ async function startDesk(session){
 async function boot(){
   $("#gateform").addEventListener("submit", async e=>{
     e.preventDefault();
-    const email=$("#g_email").value.trim(), password=$("#g_pass").value;
+    const email=loginEmail($("#g_email").value), password=$("#g_pass").value;
     if(!email||!password){ $("#g_err").textContent="Enter your email and password."; return; }
     $("#g_btn").disabled=true; $("#g_btn").textContent="Signing in…"; $("#g_err").textContent="";
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -707,6 +711,7 @@ function softNote(b){
 function setTabs(){ document.querySelectorAll(".tab").forEach(t=>t.setAttribute("aria-current", t.dataset.view===S.view?"page":"false")); }
 function render(){ renderView(); fillQRs(); }
 function renderView(){
+  if(S.role==="staff"){ $("#main").innerHTML = S.selected ? staffTaskView() : staffHomeView(); return; }
   setTabs();
   if(S.view==="customers"){ $("#main").innerHTML=viewCustomers(); return; }
   if(S.view==="revenue"){ $("#main").innerHTML=viewRevenue(); return; }
@@ -716,7 +721,7 @@ function renderView(){
   else if(S.view==="new"){ m.innerHTML = viewForm(); updateSummary(); }
   else if(S.view==="quick"){ m.innerHTML = viewQuick(); qSummary(); quickCustNote(); }
   else if(S.view==="fleet") m.innerHTML = viewFleet();
-  else if(S.view==="settings") m.innerHTML = viewSettings();
+  else if(S.view==="settings"){ m.innerHTML = viewSettings(); if(S.driveServer===undefined){ S.driveServer=null; loadDriveServer(); } }
 }
 
 function viewList(){
@@ -903,7 +908,7 @@ function viewPayments(b){
     <div id="payerr"></div>
     <div class="actions" style="margin-top:10px"><button type="button" class="btn primary" data-act="add-pay">Add entry</button></div>
     ${L.pays.length?`<div class="tablewrap"><table class="ptable num"><thead><tr><th>Date</th><th>Type</th><th>Mode</th><th style="text-align:right">Amount</th><th></th></tr></thead><tbody>
-      ${L.pays.map(p=>`<tr><td>${esc(fmtDT(p.at))}</td><td>${esc(payLabel(p))}</td><td>${esc(p.mode||"")}${p.ref?`<br><small class="muted">${esc(p.ref)}</small>`:""}</td><td style="text-align:right">${p.kind==="deposit_refund"?"− ":""}${inr(p.amount)}</td>
+      ${L.pays.map(p=>`<tr><td>${esc(fmtDT(p.at))}</td><td>${esc(payLabel(p))}${p.by?`<br><small class="muted">by ${esc(p.by)}</small>`:""}</td><td>${esc(p.mode||"")}${p.ref?`<br><small class="muted">${esc(p.ref)}</small>`:""}</td><td style="text-align:right">${p.kind==="deposit_refund"?"− ":""}${inr(p.amount)}</td>
         <td class="rowact">${waButton(b.phone, receiptText(b,p,L), "Receipt", "btn sm")}${S.confirmPay===p.id?`<button class="btn sm danger" data-act="del-pay" data-id="${esc(p.id)}">Confirm delete</button><button class="btn sm" data-act="keep-pay">Keep</button>`:`<button class="btn sm" data-act="ask-del-pay" data-id="${esc(p.id)}" aria-label="Delete entry">Delete</button>`}</td></tr>`).join("")}
     </tbody></table></div>`:`<p class="muted" style="margin:12px 0 0;font-size:14px">No payments recorded yet.</p>`}
   </section>
@@ -986,6 +991,7 @@ function viewDetail(){
       </div>
       <div class="card"><h3>Next step</h3>${nextStep(b, missing)}${b.status==="draft"&&missing.length?`<div class="errors"><ul>${Object.values(vErr).map(m=>`<li>${esc(m)}</li>`).join("")}</ul></div>`:""}</div>
       ${extCardHTML(b)}
+      ${staffActivityHTML(b)}
       <div class="card">
         <div class="actions">
           <button class="btn" data-act="edit" ${["handed","returned"].includes(b.status)?"disabled":""}>Edit details and charges</button>
@@ -1468,6 +1474,7 @@ function viewSettings(){
       ${s.owner_sign?`<div class="sigprev"><img class="sigimg" src="${s.owner_sign}" alt="Your saved signature"><button type="button" class="linkbtn" data-act="sign-remove">Remove signature</button></div>`:""}
       ${s.owner_sign_mode==="printed"&&!s.owner_sign?`<p class="err" style="margin-top:8px">Upload your signature. Until then, agreements show an empty signature box for DriveKaro.</p>`:""}
     </fieldset>
+    ${staffSettingsHTML()}
     <fieldset><legend>Reminders and daily summary</legend><div class="grid">
       ${fieldHTML("s_review","Google review link",g("google_review"),{wide:1,attrs:'placeholder="https://g.page/r/…/review" inputmode="url"',hint:"Google Business Profile → Ask for reviews → copy the link. Used in the review request message."})}
       ${fieldHTML("s_ownwa","Your WhatsApp number",g("owner_whatsapp"),{hint:"For “Summary to my WhatsApp”. Blank = support phone."})}
@@ -2087,6 +2094,300 @@ function readDoorstep(prefix){
     drop_mode:dm, drop_address:dm==="collection"?v("draddr"):"", drop_charge:dm==="collection"?v("drcharge"):"", with_delivery:false};
 }
 
+/* ---------- staff (pickup / return) mode ---------- */
+const STAFF_DOMAIN = "staff.drivekaro.in";
+function loginEmail(v){ const t=String(v||"").trim(); const d=t.replace(/\D/g,""); return (!t.includes("@") && d.length>=10) ? `s${d.slice(-10)}@${STAFF_DOMAIN}` : t; }
+async function staffApi(payload){ return api("/api/staff", payload); }
+async function startStaff(name){
+  S.role="staff"; S.staffName=name; S.downloads=fileSaver;
+  document.querySelector("nav.tabs").hidden=true;
+  const sub=document.querySelector(".brand span"); if(sub) sub.textContent="Staff · "+name;
+  const es=document.querySelector("header .esign"); if(es) es.hidden=true;
+  await staffLoad(true);
+  setInterval(()=>staffLoad(false), 60000);
+  window.addEventListener("focus", ()=>staffLoad(false));
+  preloadDrive();
+}
+async function staffLoad(first){
+  if(!first && (S.staffBusy || (document.activeElement && document.activeElement.closest && document.activeElement.closest(".stask")))) return;
+  try{
+    const r=await staffApi({action:"tasks"});
+    S.bookings=r.bookings||[]; S.fleet=r.fleet||[]; S.photosReady=!!r.photos_ready;
+    const d=r.settings||{}; S.settings={...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), ...d, charges:{...DEFAULT_CHARGES, ...(d.charges||{})}};
+    S.dbState="on"; setBanner("");
+  }catch(e){ setBanner(e.message||"Couldn't load your bookings. Check the internet."); }
+  render();
+}
+async function staffSave(b, payload, okMsg){
+  if(S.staffBusy) return false; S.staffBusy=true;
+  try{ const r=await staffApi({action:"save", bookingId:b.id, ...payload}); localUpsert(S.bookings, r.booking); S.staffBusy=false; render(); if(okMsg) toast(okMsg); return true; }
+  catch(e){ S.staffBusy=false; toast(e.message); return false; }
+}
+function mapsLink(place){ return /^https?:\/\//.test(place) ? place : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`; }
+function staffCardHTML(b, kind){
+  const car=carOf(b)||{}; const st=STATUS[b.status]||STATUS.draft;
+  const when = kind==="return" ? b.drop : b.pickup;
+  const place = kind==="return" ? dropPlace(b) : pickupPlace(b);
+  const late = new Date(when)<new Date() && ["handed"].includes(b.status) && kind==="return";
+  const due = kind==="return" ? Math.max(0, ledger(b).balance) : dueNow(b,S.settings);
+  return `<button class="scard ${late?"late":""}" data-open="${esc(b.id)}">
+    <span class="stime">${esc(fmtTime(when))}<small>${esc(fmtD(when))}</small></span>
+    <span class="sbody"><b>${esc(b.name||"Customer")}</b><small><span class="plate">${esc(car.plate||"")}</span> ${esc(car.make_model||"")}</small><small>${esc(kind==="return"?"Return at":"Pickup at")}: ${esc(place)}</small></span>
+    <span class="sside"><span class="pill ${late?"s-cancelled":st.cls}">${late?"Overdue":esc(st.label)}</span>${due>0?`<small class="err">Collect ${inr(due)}</small>`:""}</span>
+  </button>`;
+}
+function staffHomeView(){
+  const now=new Date(), t0=new Date(); t0.setHours(0,0,0,0); const t1=new Date(t0.getTime()+864e5), t2=new Date(t0.getTime()+2*864e5);
+  const pick=S.bookings.filter(b=>["confirmed","draft","ready","sent","signed"].includes(b.status)).sort((a,b)=>new Date(a.pickup)-new Date(b.pickup));
+  const ret=S.bookings.filter(b=>b.status==="handed").sort((a,b)=>new Date(a.drop)-new Date(b.drop));
+  const done=S.bookings.filter(b=>["returned"].includes(b.status) || (b.status==="handed" && b.handed_at && new Date(b.handed_at)>=t0));
+  const sec=(title, list, kind, empty)=>`<h3 class="shead">${esc(title)} <span class="muted">${list.length}</span></h3>${list.length?`<div class="slist">${list.map(b=>staffCardHTML(b,kind)).join("")}</div>`:`<p class="muted" style="margin:0 0 8px;font-size:14px">${esc(empty)}</p>`}`;
+  const pToday=pick.filter(b=>new Date(b.pickup)<t1), pTom=pick.filter(b=>new Date(b.pickup)>=t1);
+  const rToday=ret.filter(b=>new Date(b.drop)<t1), rLater=ret.filter(b=>new Date(b.drop)>=t1);
+  return `<div class="head-row"><div><h2>Hello, ${esc(S.staffName||"")}</h2><div class="muted" style="font-size:14px">${esc(now.toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long"}))} · tap a booking to start</div></div><button class="btn sm" data-act="staff-refresh">Refresh</button></div>
+    ${S.dbState==="loading"?`<div class="empty">Loading…</div>`:`
+    ${sec("Pickups today", pToday, "pickup", "No pickups today.")}
+    ${sec("Returns today", rToday, "return", "No returns today.")}
+    ${sec("Pickups tomorrow", pTom, "pickup", "None yet.")}
+    ${rLater.length?sec("Cars out (return later)", rLater, "return", ""):""}
+    ${done.length?`<h3 class="shead">Done today <span class="muted">${done.length}</span></h3><div class="slist">${done.map(b=>staffCardHTML(b, b.status==="returned"?"return":"pickup")).join("")}</div>`:""}`}`;
+}
+function stepHTML(n, title, done, body, open){
+  return `<details class="sstep ${done?"done":""}" ${open?"open":""}><summary><span class="snum">${done?"✓":n}</span><b>${esc(title)}</b></summary><div class="sbody2">${body}</div></details>`;
+}
+function kycMissingB(b){ return KYC_REQUIRED.filter(([k])=>!String(b[k]??"").trim()).map(([,l])=>l); }
+function staffPhotosHTML(b, stage){
+  const ph=(b.photos||[]).filter(p=>p.stage===stage);
+  return `<div class="field wide"><label>Car photos (${stage==="return"?"return":"pickup"}) · ${ph.length} uploaded</label>
+    ${S.photosReady?`<input type="file" accept="image/*" capture="environment" multiple data-upload="car" data-stage="${stage}">
+      <span class="hint">All 4 sides, front and back close-up, dashboard (km and fuel), any damage.</span>`:`<span class="hint err">Photo upload is not set up yet. Ask the owner to connect Google Drive in Settings.</span>`}
+    ${ph.length?`<div class="sphotos">${ph.map(p=>`<a href="${esc(p.link||"#")}" target="_blank" rel="noopener">${esc(p.name.split(" - ")[0])} ✓</a>`).join("")}</div>`:""}</div>`;
+}
+function staffPayHTML(b, kind){
+  const L=ledger(b), s=S.settings;
+  const depDue = kind==="pickup" && depType(b)==="cash" ? Math.max(0,(Number(b.deposit)||0)-L.depIn) : 0;
+  const rentDue = Math.max(0, L.balance);
+  const due = rentDue + depDue;
+  const amt = S.staffPayAmt?.[b.id] ?? (rentDue || depDue || "");
+  const pays=(b.payments||[]).filter(p=>["payment","deposit_in"].includes(p.kind));
+  return `<dl class="kv num" style="margin:0 0 10px">
+      <dt>Rent balance</dt><dd>${inr(rentDue)}</dd>
+      ${kind==="pickup"&&depType(b)==="cash"?`<dt>Security deposit</dt><dd>${inr(depDue)}${L.depIn?` <small class="muted">(${inr(L.depIn)} received)</small>`:""}</dd>`:""}
+      ${kind==="pickup"&&depType(b)!=="cash"?`<dt>Security</dt><dd>${esc(depShort(b))}</dd>`:""}
+      <dt class="total">To collect now</dt><dd class="total">${inr(due)}</dd>
+    </dl>
+    ${due>0 && s.official_upi ? `<div class="upibox"><img class="upiqr" id="upiqr" data-qr="${esc(upiFor(b,amt||due))}" alt="UPI QR code" width="176" height="176"><div class="upiside"><div class="muted" style="font-size:13px">Customer scans this QR. Money goes to <b>${esc(s.official_upi)}</b>.</div></div></div>`:""}
+    ${due>0 && !s.official_upi ? `<p class="note">UPI ID is not set in Settings. Collect by the owner's UPI or cash.</p>`:""}
+    ${due>0?`<div class="grid" style="margin-top:10px">
+      ${selectHTML("sp_kind","For",rentDue?"payment":"deposit_in",[["payment","Rent / balance"],...(depDue?[["deposit_in","Security deposit"]]:[])])}
+      ${fieldHTML("sp_amt","Amount received (₹)",amt,{type:"number",attrs:'min="1" inputmode="numeric"'})}
+      ${selectHTML("sp_mode","Paid by","UPI",[["UPI","UPI"],["Cash","Cash"]])}
+      ${fieldHTML("sp_ref","UPI reference (last digits)","")}
+    </div><div class="actions" style="margin-top:8px"><button class="btn primary" data-act="staff-pay">Record payment received</button></div>`:`<p class="okline" style="margin:0">Nothing to collect.</p>`}
+    ${pays.length?`<div class="sphotos" style="margin-top:10px">${pays.map(p=>`<span>${esc(p.advance?"Advance":PAY_KINDS[p.kind])} ${inr(p.amount)} · ${esc(p.mode||"")}${p.by?` · ${esc(p.by)}`:""}</span>`).join("")}</div>`:""}`;
+}
+function staffTaskView(){
+  const b=S.bookings.find(x=>x.id===S.selected);
+  if(!b){ S.selected=null; return staffHomeView(); }
+  const car=carOf(b)||{}; const g=k=>b[k]??"";
+  const isReturn=["handed","returned"].includes(b.status);
+  const place=isReturn?dropPlace(b):pickupPlace(b);
+  const tel=String(b.phone||"").replace(/\D/g,"").slice(-10);
+  const head=`<div class="head-row"><div><button class="btn sm" data-act="back">← Today</button></div></div>
+    <div class="card stask-head"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="plate">${esc(car.plate||"")}</span><span class="pill ${(STATUS[b.status]||STATUS.draft).cls}">${esc((STATUS[b.status]||STATUS.draft).label)}</span></div>
+      <h3 style="font-size:20px;margin:8px 0 2px">${esc(b.name||"Customer")}</h3>
+      <div class="muted" style="font-size:14px">${esc(car.make_model||"")} · ${isReturn?"Return":"Pickup"} ${esc(fmtDT(isReturn?b.drop:b.pickup))}</div>
+      <div style="font-size:14px;margin-top:6px">${esc(place)}</div>
+      <div class="actions" style="margin-top:10px">${tel?`<a class="btn sm" href="tel:+91${tel}">Call</a>`:""}${waHref(b.phone,"x")?`<a class="btn sm wa" href="${esc(waHref(b.phone,`Hello ${b.name||""}, this is ${S.staffName} from ${S.settings.business_name}.`))}" target="_blank" rel="noopener">WhatsApp</a>`:""}<a class="btn sm" href="${esc(mapsLink(place))}" target="_blank" rel="noopener">Maps</a></div></div>`;
+  if(b.status==="returned") return head+`<div class="card"><p style="margin:0">Returned ${esc(fmtDT(b.returned_at||b.return_at))}${b.returned_by?` · by ${esc(b.returned_by)}`:""}. The owner will settle the deposit.</p></div>`;
+  if(isReturn){
+    const L=ledger(b); const sg=suggestions(b).filter(x=>!L.extras.some(e=>e.label===x.label));
+    const s1=`<div class="grid stask">
+        ${fieldHTML("sr_odo","Odometer at return (km)",g("odo_return"),{type:"number",attrs:'min="0" inputmode="numeric"',hint:b.odo?`At pickup: ${Number(b.odo).toLocaleString("en-IN")} km`:""})}
+        ${selectHTML("sr_fuel","Fuel at return",g("fuel_return"),[["",""],...FUEL.map(f=>[f,f])],{hint:b.fuel?`At pickup: ${b.fuel}`:""})}
+        ${fieldHTML("sr_at","Returned at",g("return_at")||toLocalInput(),{type:"datetime-local"})}
+        ${fieldHTML("sr_dmg","New damage or issues",g("return_damage"),{type:"textarea",wide:1,attrs:'placeholder="None, or describe with location"'})}
+        ${staffPhotosHTML(b,"return")}
+      </div><div class="actions" style="margin-top:10px"><button class="btn primary" data-act="staff-save-return">Save return check</button></div>`;
+    const s2=`${sg.length?`<div class="suggest" style="margin:0 0 10px">${sg.map(x=>`<div><b>${esc(x.label)}:</b> ${esc(x.info)} → <b>${inr(x.amount)}</b> <button type="button" class="btn sm" data-act="staff-extra" data-label="${esc(x.label)}" data-amount="${x.amount}" data-note="${esc(x.note)}">Add charge</button></div>`).join("")}</div>`:`<p class="muted" style="margin:0 0 10px;font-size:14px">${b.odo_return?"No extra charges found.":"Save the return check to calculate extra km and late charges."}</p>`}
+      ${L.extras.length?`<div class="sphotos" style="margin-bottom:10px">${L.extras.map(x=>`<span>${esc(x.label)} ${inr(x.amount)}</span>`).join("")}</div>`:""}
+      ${staffPayHTML(b,"return")}
+      <p class="note" style="margin:10px 0 0">Damage, fuel or cleaning charges and the deposit refund are decided by the owner.</p>`;
+    const canReturn=!!b.odo_return;
+    const s3=`${canReturn&&L.balance>0?`<p class="note" style="margin:0 0 10px">${inr(L.balance)} is still due. Collect it, or the owner will adjust it from the deposit.</p>`:""}<p style="margin:0 0 10px;font-size:14px">${canReturn?"Check the car, keys and documents are back, then mark it returned.":"Save the return odometer first."}</p><button class="btn primary" data-act="staff-returned" ${canReturn?"":"disabled"}>Mark car returned</button>`;
+    return head+stepHTML(1,"Return check",!!b.odo_return,s1,!b.odo_return)+stepHTML(2,"Charges and payment",!!b.odo_return && L.balance<=0,s2,!!b.odo_return)+stepHTML(3,"Car returned",false,s3,!!b.odo_return && L.balance<=0);
+  }
+  // pickup
+  const miss=kycMissingB(b);
+  const s1=`<div class="grid stask">
+      ${fieldHTML("sk_name","Full name (as on DL)",g("name"),{req:1})}
+      ${fieldHTML("sk_father","Father's / spouse's name",g("father"),{req:1})}
+      ${fieldHTML("sk_dob","Date of birth",g("dob"),{type:"date",req:1})}
+      ${fieldHTML("sk_address","Address",g("address"),{type:"textarea",wide:1,req:1})}
+      ${fieldHTML("sk_emergency","Emergency contact (name and mobile)",g("emergency"),{req:1})}
+      ${fieldHTML("sk_alt","Alternate mobile",g("alt_phone"),{type:"tel"})}
+      ${fieldHTML("sk_email","Email",g("email"),{type:"email"})}
+      ${fieldHTML("sk_dl","Driving licence number",g("dl"),{req:1,attrs:'style="text-transform:uppercase"'})}
+      ${fieldHTML("sk_dltill","Licence valid till",g("dl_till"),{type:"date",req:1})}
+      ${fieldHTML("sk_rto","Issuing RTO",g("rto"))}
+      ${selectHTML("sk_idtype","ID type",g("id_type")||IDTYPES[0],IDTYPES.map(x=>[x,x]))}
+      ${fieldHTML("sk_a4","ID last 4 digits only",g("aadhaar4"),{req:1,attrs:'maxlength="4" inputmode="numeric"',hint:"Never write the full Aadhaar number."})}
+    </div>
+    <details class="more"><summary>Additional driver (optional)</summary><div class="grid" style="margin-top:10px">
+      ${fieldHTML("sk_aname","Full name",g("addl_name"))}${fieldHTML("sk_adob","Date of birth",g("addl_dob"),{type:"date"})}${fieldHTML("sk_aphone","Mobile",g("addl_phone"),{type:"tel"})}${fieldHTML("sk_adl","DL number",g("addl_dl"),{attrs:'style="text-transform:uppercase"'})}${fieldHTML("sk_adltill","DL valid till",g("addl_dl_till"),{type:"date"})}
+    </div></details>
+    <div class="actions" style="margin-top:10px"><button class="btn primary" data-act="staff-save-kyc">Save customer details</button></div>
+    <div class="field wide" style="margin-top:14px"><label>Document photos</label>
+      ${S.photosReady?`<div class="grid"><div class="field"><select id="sk_doctype">${DOC_TYPES.map(t=>`<option>${esc(t)}</option>`).join("")}</select></div><div class="field"><input type="file" accept="image/*,application/pdf" capture="environment" data-upload="kyc"></div></div><span class="hint">Aadhaar: masked copy only.</span>`:`<span class="hint err">Photo upload is not set up yet. Ask the owner to connect Google Drive in Settings.</span>`}
+      ${(S.kycUp?.[b.id]||[]).length?`<div class="sphotos">${S.kycUp[b.id].map(d=>`<a href="${esc(d.link||"#")}" target="_blank" rel="noopener">${esc(d.type)} ✓</a>`).join("")}</div>`:""}
+    </div>`;
+  const s2=`<div class="grid stask">
+      ${fieldHTML("sh_odo","Odometer at pickup (km)",g("odo"),{type:"number",req:1,attrs:'min="0" inputmode="numeric"'})}
+      ${selectHTML("sh_fuel","Fuel level",g("fuel"),[["",""],...FUEL.map(f=>[f,f])])}
+      ${selectHTML("sh_keys","Keys handed over",g("keys"),[["",""],["1","1"],["2","2"]])}
+      ${fieldHTML("sh_ext","Existing outside damage",g("ext_damage"),{type:"textarea",wide:1,attrs:'placeholder="e.g. scratch on rear bumper, left"'})}
+      ${fieldHTML("sh_int","Existing inside damage",g("int_damage"),{type:"textarea",wide:1})}
+      ${depFieldsHTML(g,{})}
+      ${staffPhotosHTML(b,"pickup")}
+    </div><div class="actions" style="margin-top:10px"><button class="btn primary" data-act="staff-save-handover">Save car check</button></div>`;
+  let s3;
+  if(["confirmed","draft"].includes(b.status)){
+    const v=validate(b,true); const errs=Object.values(v);
+    s3=errs.length?`<div class="errors" style="margin:0 0 10px"><b>Complete first:</b><ul>${errs.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div><button class="btn" disabled>Make agreement</button>`
+      :`<p style="margin:0 0 10px;font-size:14px">Details are complete. Make the agreement, then send it for Aadhaar eSign.</p><button class="btn primary" data-act="staff-ready">Make agreement</button>`;
+  } else if(b.status==="ready") s3=`${esignNotice(b)}<p style="margin:0 0 10px;font-size:14px">Send the agreement to ${esc(b.name)}'s mobile for Aadhaar OTP signing. They sign on their phone now.</p><button class="btn primary" data-act="esign-send" ${S.esignBusy?"disabled":""}>${S.esignBusy?"Sending…":"Send for Aadhaar eSign"}</button>`;
+  else if(b.status==="sent") s3=b.esign?.document_id?esignPanelHTML(b):`<p class="muted">Sent for signing.</p>`;
+  else s3=`<p class="okline" style="margin:0">Agreement signed by the customer.</p>`;
+  const due=dueNow(b,S.settings);
+  const blockers=[b.status!=="signed"&&"Agreement not signed yet", due>0&&`${inr(due)} still to collect`, !b.odo&&"Pickup odometer not saved", depType(b)==="bike"&&!b.dep_bike_no&&"Bike number for the deposit", depType(b)==="document"&&!b.dep_doc_type&&"Which document was taken"].filter(Boolean);
+  const s5=`${blockers.length?`<div class="errors" style="margin:0 0 10px"><ul>${blockers.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`:`<p style="margin:0 0 10px;font-size:14px">Everything is done. Show the customer the car, then hand over the keys.</p>`}<button class="btn primary" data-act="staff-handed" ${blockers.length?"disabled":""}>Mark car handed over</button>`;
+  return head
+    +stepHTML(1,"Customer details",!miss.length,s1,!!miss.length)
+    +stepHTML(2,"Car check and deposit",!!b.odo,s2,!miss.length && !b.odo)
+    +stepHTML(3,"Agreement and eSign",b.status==="signed",s3,!miss.length && !!b.odo && b.status!=="signed")
+    +stepHTML(4,"Payment",due<=0,staffPayHTML(b,"pickup"),b.status==="signed" && due>0)
+    +stepHTML(5,"Hand over the car",false,s5,!blockers.length);
+}
+function readVals(map){ const o={}; for(const [k,id] of Object.entries(map)){ const el=$("#"+id); if(el) o[k]=(el.value??"").trim(); } return o; }
+async function staffUploadFiles(input){
+  const b=S.bookings.find(x=>x.id===S.selected); if(!b) return;
+  const files=[...(input.files||[])]; if(!files.length) return;
+  const kind=input.dataset.upload, stage=input.dataset.stage;
+  S.staffBusy=true; let ok=0;
+  for(const [i,file] of files.entries()){
+    toast(`Uploading ${i+1} of ${files.length}…`);
+    try{
+      const small=await shrinkImage(file, 1600, 0.8);
+      if(small.size>3.8*1024*1024){ toast("That file is too large."); continue; }
+      const dataBase64=await blobToBase64(small);
+      const r=await staffApi({action:"upload", bookingId:b.id, kind, stage, docType: kind==="kyc"?($("#sk_doctype")?.value||"Other"):"", mime: small.type||"image/jpeg", dataBase64});
+      if(kind==="kyc"){ S.kycUp={...(S.kycUp||{}), [b.id]:[...((S.kycUp||{})[b.id]||[]), r.entry]}; }
+      else localUpsert(S.bookings, r.booking);
+      ok++;
+    }catch(e){ toast(e.message||"Upload failed."); }
+  }
+  S.staffBusy=false; render(); if(ok) toast(`${ok} uploaded to Drive.`);
+}
+async function staffClick(act, t, b){
+  switch(act){
+    case "staff-refresh": await staffLoad(true); toast("Updated."); return true;
+    case "staff-save-kyc": {
+      const v=readVals({name:"sk_name",father:"sk_father",dob:"sk_dob",address:"sk_address",emergency:"sk_emergency",alt_phone:"sk_alt",email:"sk_email",dl:"sk_dl",dl_till:"sk_dltill",rto:"sk_rto",id_type:"sk_idtype",aadhaar4:"sk_a4",addl_name:"sk_aname",addl_dob:"sk_adob",addl_phone:"sk_aphone",addl_dl:"sk_adl",addl_dl_till:"sk_adltill"});
+      if(v.aadhaar4 && !/^\d{4}$/.test(v.aadhaar4)){ toast("Enter only the last 4 digits of the ID."); return true; }
+      await staffSave(b,{patch:v},"Customer details saved."); return true; }
+    case "staff-save-handover": {
+      const v=readVals({odo:"sh_odo",fuel:"sh_fuel",keys:"sh_keys",ext_damage:"sh_ext",int_damage:"sh_int",deposit_type:"f_deptype",deposit:"f_deposit",dep_bike_no:"f_depbike",dep_bike_model:"f_depbikemodel",dep_doc_type:"f_depdoc",dep_doc_details:"f_depdocdet"});
+      if(!(Number(v.odo)>0)){ toast("Enter the odometer reading."); return true; }
+      if(v.deposit_type!=="cash") v.deposit="";
+      await staffSave(b,{patch:v},"Car check saved."); return true; }
+    case "staff-ready": await staffSave(b,{status:"ready"},"Agreement ready. Send it for eSign."); return true;
+    case "staff-pay": {
+      const amt=Number($("#sp_amt")?.value); if(!(amt>0)){ toast("Enter the amount received."); return true; }
+      const mode=$("#sp_mode").value, ref=($("#sp_ref")?.value||"").trim();
+      if(mode==="UPI" && !ref && !confirm("No UPI reference entered. Record anyway?")) return true;
+      if(S.staffPayAmt) delete S.staffPayAmt[b.id];
+      await staffSave(b,{payment:{kind:$("#sp_kind").value, amount:amt, mode, ref, at:toLocalInput()}},`${inr(amt)} recorded.`); return true; }
+    case "staff-handed": if(confirm("Hand over the car now?")) await staffSave(b,{status:"handed"},"Car handed over. Have a safe trip!"); return true;
+    case "staff-save-return": {
+      const v=readVals({odo_return:"sr_odo",fuel_return:"sr_fuel",return_at:"sr_at",return_damage:"sr_dmg"});
+      if(!(Number(v.odo_return)>0)){ toast("Enter the odometer reading."); return true; }
+      if(b.odo && Number(v.odo_return)<Number(b.odo)){ toast("Return reading is lower than the pickup reading. Check it."); return true; }
+      await staffSave(b,{patch:v},"Return check saved."); return true; }
+    case "staff-extra": await staffSave(b,{extra:{label:t.dataset.label, amount:Number(t.dataset.amount), note:t.dataset.note}},`${t.dataset.label} added.`); return true;
+    case "staff-returned": if(confirm("Mark the car returned?")) await staffSave(b,{status:"returned"},"Car returned. Thank you!"); return true;
+  }
+  return false;
+}
+
+/* ---------- owner: staff accounts and Drive for staff photos ---------- */
+function staffSettingsHTML(){
+  const list=(S.staff||[]).slice().sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  const ds=S.driveServer;
+  return `<fieldset><legend>Staff logins (pickup and drop)</legend>
+    <p class="muted" style="margin:0 0 10px;font-size:14px">Staff open <b>drivekaro.in/desk</b> and sign in with their <b>mobile number</b> and password. They see only today's and tomorrow's pickups and returns: customer details, car check, eSign, payment QR and handover. They never see revenue, commission, expenses or settings.</p>
+    ${list.length?`<div class="list" style="margin-bottom:12px">${list.map(st=>S.staffEdit===st.id?`<div class="row staffrow"><div class="grid" style="width:100%">
+        ${fieldHTML("st_name_"+st.id,"Name",st.name)}${fieldHTML("st_mobile_"+st.id,"Mobile",st.mobile,{type:"tel"})}${fieldHTML("st_pass_"+st.id,"New password (optional)","",{attrs:'autocomplete="new-password" placeholder="Leave blank to keep"'})}
+        <div class="actions" style="grid-column:1/-1"><button type="button" class="btn sm primary" data-act="staff-upd" data-id="${esc(st.id)}">Save</button><button type="button" class="btn sm" data-act="staff-edit" data-id="">Cancel</button></div></div></div>`
+      :`<div class="row staffrow"><span class="who"><b>${esc(st.name)}</b><small>${esc(fmtPhone(st.mobile))}</small></span><span class="pill ${st.active===false?"s-cancelled":"s-signed"}">${st.active===false?"Disabled":"Active"}</span>
+        <span class="rowact"><button type="button" class="btn sm" data-act="staff-edit" data-id="${esc(st.id)}">Edit</button><button type="button" class="btn sm" data-act="staff-toggle" data-id="${esc(st.id)}">${st.active===false?"Enable":"Disable"}</button>${S.confirmStaffDel===st.id?`<button type="button" class="btn sm danger" data-act="staff-del" data-id="${esc(st.id)}">Confirm delete</button>`:`<button type="button" class="btn sm" data-act="staff-ask-del" data-id="${esc(st.id)}">Delete</button>`}</span></div>`).join("")}</div>`:`<p class="muted" style="margin:0 0 10px;font-size:14px">No staff yet.</p>`}
+    <div class="grid">
+      ${fieldHTML("st_name","Name","")}${fieldHTML("st_mobile","Mobile number","",{type:"tel",attrs:'inputmode="tel"'})}${fieldHTML("st_pass","Password","",{attrs:'autocomplete="new-password"',hint:"At least 8 characters. Share it with them privately."})}
+    </div>
+    <div class="actions" style="margin-top:10px"><button type="button" class="btn primary" data-act="staff-add">Add staff member</button></div>
+    <h4 style="margin:18px 0 6px;font-size:15px">Photos from staff phones</h4>
+    <p class="muted" style="margin:0 0 8px;font-size:13.5px">Staff photos (DL, masked Aadhaar, car photos) go to your Google Drive. Connect once with the Google account that holds the KYC folders.</p>
+    ${ds==null?`<p class="muted" style="font-size:13px">Checking…</p>`:ds.connected?`<p class="okline" style="margin:0 0 8px">Connected${ds.email?` to ${esc(ds.email)}`:""}.</p><div class="actions"><button type="button" class="btn sm" data-act="drive-server-connect">Reconnect</button><button type="button" class="btn sm" data-act="drive-server-off">Disconnect</button></div>`
+      :`${ds.error?`<p class="err" style="margin:0 0 8px">${esc(ds.error)}</p>`:""}<button type="button" class="btn sm primary" data-act="drive-server-connect">Connect Google Drive for staff</button>`}
+  </fieldset>`;
+}
+async function loadDriveServer(){ try{ S.driveServer=await staffApi({action:"drive_status"}); }catch(e){ S.driveServer={connected:false, error:e.message}; } if(S.view==="settings") render(); }
+function connectDriveServer(){
+  const cid=import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  if(!cid){ toast("Google sign-in is not set up."); return; }
+  if(!window.google?.accounts?.oauth2){ preloadDrive(); toast("Google sign-in is loading. Tap again in a moment."); return; }
+  const client=window.google.accounts.oauth2.initCodeClient({ client_id:cid, scope:"https://www.googleapis.com/auth/drive.file", ux_mode:"popup",
+    callback: async r=>{ if(r.error){ toast(r.error_description||r.error); return; } try{ const x=await staffApi({action:"drive_connect", code:r.code}); toast(`Drive connected${x.email?` (${x.email})`:""}.`); await loadDriveServer(); }catch(e){ toast(e.message); } } });
+  client.requestCode();
+}
+async function ownerStaffClick(act, t){
+  switch(act){
+    case "staff-add": {
+      const name=($("#st_name").value||"").trim(), mobile=($("#st_mobile").value||"").trim(), password=$("#st_pass").value||"";
+      t.disabled=true;
+      try{ const r=await staffApi({action:"staff_create", name, mobile, password}); localUpsert(S.staff, r.staff); render(); toast(`${name} added. Share the mobile and password with them.`); }
+      catch(e){ toast(e.message); t.disabled=false; }
+      return true; }
+    case "staff-edit": S.staffEdit=t.dataset.id||null; render(); return true;
+    case "staff-upd": {
+      const id=t.dataset.id; t.disabled=true;
+      try{ const r=await staffApi({action:"staff_update", id, name:$("#st_name_"+id).value, mobile:$("#st_mobile_"+id).value, password:$("#st_pass_"+id).value||undefined}); localUpsert(S.staff, r.staff); S.staffEdit=null; render(); toast("Saved."); }
+      catch(e){ toast(e.message); t.disabled=false; }
+      return true; }
+    case "staff-toggle": {
+      const st=S.staff.find(x=>x.id===t.dataset.id); if(!st) return true;
+      try{ const r=await staffApi({action:"staff_update", id:st.id, active: st.active===false}); localUpsert(S.staff, r.staff); render(); toast(r.staff.active?"Enabled.":"Disabled. They can't sign in now."); }catch(e){ toast(e.message); }
+      return true; }
+    case "staff-ask-del": S.confirmStaffDel=t.dataset.id; render(); return true;
+    case "staff-del": {
+      try{ await staffApi({action:"staff_delete", id:t.dataset.id}); S.staff=S.staff.filter(x=>x.id!==t.dataset.id); S.confirmStaffDel=null; render(); toast("Staff login deleted."); }catch(e){ toast(e.message); }
+      return true; }
+    case "drive-server-connect": connectDriveServer(); return true;
+    case "drive-server-off": { if(!confirm("Disconnect Drive? Staff won't be able to upload photos.")) return true; try{ await staffApi({action:"drive_disconnect"}); await loadDriveServer(); toast("Disconnected."); }catch(e){ toast(e.message); } return true; }
+  }
+  return false;
+}
+function staffActivityHTML(b){
+  const log=(b.staff_log||[]).slice(-6).reverse(); const ph=b.photos||[];
+  if(!log.length && !ph.length && !b.handed_by && !b.returned_by) return "";
+  return `<div class="card"><h3>Staff and photos</h3>
+    ${b.handed_by?`<p style="margin:0 0 4px;font-size:14px">Handed over by <b>${esc(b.handed_by)}</b>${b.handed_at?`, ${esc(fmtDT(b.handed_at))}`:""}</p>`:""}
+    ${b.returned_by?`<p style="margin:0 0 4px;font-size:14px">Returned to <b>${esc(b.returned_by)}</b>${b.returned_at?`, ${esc(fmtDT(b.returned_at))}`:""}</p>`:""}
+    ${ph.length?`<p style="margin:6px 0;font-size:14px">Photos: ${ph.filter(p=>p.stage==="pickup").length} at pickup · ${ph.filter(p=>p.stage==="return").length} at return${b.photos_folder_id?` · <a href="${esc(folderUrl(b.photos_folder_id))}" target="_blank" rel="noopener">Open folder</a>`:""}</p>`:""}
+    ${b.return_damage?`<p style="margin:6px 0;font-size:14px"><b>Damage noted at return:</b> ${esc(b.return_damage)}</p>`:""}
+    ${log.length?`<ul class="slog">${log.map(l=>`<li><span class="muted">${esc(fmtDT(l.at))}</span> ${esc(l.by)}: ${esc(l.did)}</li>`).join("")}</ul>`:""}
+  </div>`;
+}
+
 /* ---------- UPI payments ---------- */
 function upiFor(b, amount){ const s=S.settings; return s.official_upi ? upiLink({upi:s.official_upi, name:s.legal_name, amount, note:`${s.business_name||"DriveKaro"} ${b.id}`}) : ""; }
 function payLinkFor(b, amount){ return S.settings.official_upi && amount>0 ? payUrl(location.origin, b.id, amount) : ""; }
@@ -2651,6 +2952,8 @@ document.addEventListener("click", async e=>{
   if(t.dataset.editcar){ S.carEdit=t.dataset.editcar; S.confirmCar=false; render(); return; }
   const act=t.dataset.act; if(!act) return;
   const b = S.selected ? S.bookings.find(x=>x.id===S.selected) : null;
+  if(S.role==="staff"){ if(await staffClick(act,t,b)) return; if(!["back","esign-send","esign-refresh","copy-signlink"].includes(act)) return; }
+  else if(await ownerStaffClick(act,t)) return;
   switch(act){
     case "new": S.editId=null; S.draft=null; S.view="new"; render(); break;
     case "quick": S.editId=null; S.quick=null; S.view="quick"; S.selected=null; render(); window.scrollTo(0,0); $("#q_phone")?.focus(); break;
@@ -2840,6 +3143,7 @@ document.addEventListener("input", e=>{
   if(e.target.id==="e_drop") updateExtInfo();
   if(e.target.id==="e_amount") delete e.target.dataset.auto;
   if(e.target.id==="u_amt") onUpiAmount();
+  if(e.target.id==="sp_amt"){ const b=S.bookings.find(x=>x.id===S.selected); const amt=Math.round(Number(e.target.value)||0); if(b){ S.staffPayAmt={...(S.staffPayAmt||{}), [b.id]:amt}; const img=$("#upiqr"); if(img && amt>0){ img.dataset.qr=upiFor(b,amt); delete img.dataset.done; fillQRs(); } } }
   if(e.target.id==="q_phone") quickCustNote();
   if(e.target.closest("#qform") && e.target.getAttribute("aria-invalid")){ e.target.removeAttribute("aria-invalid"); e.target.parentElement.querySelector(".err")?.remove(); }
   if(e.target.closest("#qform")) qSummary();
@@ -2851,6 +3155,7 @@ document.addEventListener("mousedown", e=>{ if(e.target.closest(".dd")) e.preven
 document.addEventListener("keydown", e=>{ if(e.target.id==="f_phone" && e.key==="Enter"){ e.preventDefault(); const first=$("#custdd .dd-row"); if(first) first.click(); } if(e.key==="Escape"){ const dd=$("#custdd"); if(dd) dd.hidden=true; } });
 document.addEventListener("change", e=>{
   if(e.target.id==="f_pickup"||e.target.id==="f_drop") refreshCarOptions();
+  if(e.target.matches && e.target.matches("input[data-upload]")){ staffUploadFiles(e.target); return; }
   if(e.target.id==="f_deptype") showDepFields();
   if(e.target.id==="c_own") document.querySelectorAll(".opcar").forEach(el=>el.hidden=e.target.value!=="operator");
   if(/(pumode|drmode)$/.test(e.target.id)){ document.querySelectorAll(`.dsf[data-for="${e.target.id}"]`).forEach(el=>el.hidden=e.target.value==="office");

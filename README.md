@@ -94,3 +94,9 @@ The owner's plain-language guide ("DriveKaro System Handover Guide") covers acco
 - **Rules:** store only Aadhaar last 4 digits; no secrets in code or `VITE_` vars; the WhatsApp confirmation terms (`confirmText`) must match the agreement (`buildAgreement`) — both read the same charges.
 - **Known gaps:** the public site still uses the old `cars`/`bookings` tables for availability and enquiries (a desk booking can look free online); Supabase caps queries at 1,000 rows (add paging in `store.js` when bookings grow).
 - **Workflow:** test at 390 px width; push to `main` deploys via Vercel.
+
+### Staff logins (pickup and drop)
+
+- Owner adds staff in Desk → Settings → Staff logins (name, mobile, password). This creates a Supabase Auth user `s<mobile>@staff.drivekaro.in`; staff sign in at `/desk` with their mobile number.
+- Staff never query the database: `api/staff.js` returns only bookings in scope (pickups yesterday–tomorrow, cars out, today's returns) without `commission`, `op_payouts` or `notes`, and accepts only whitelisted fields and steps (`api/_lib/staff.js` `applyStaffPatch`). eSign send/status also accept staff.
+- Staff photos go to the owner's Google Drive through a server-side refresh token (Settings → Connect Google Drive for staff). Needs Vercel Secret `GOOGLE_CLIENT_SECRET` (the OAuth web client's secret); the refresh token is stored in `desk_docs` `secrets/drive_server`.

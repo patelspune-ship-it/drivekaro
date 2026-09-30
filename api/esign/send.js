@@ -1,6 +1,7 @@
 // POST /api/esign/send  { bookingId, pdfBase64 }
 // Sends the booking's agreement PDF to Leegality for Aadhaar eSign and saves the signing links.
-import { HttpError, cfg, admin, body, requireOwner, getDoc, saveDoc, leegality, buildInvitees, fail } from '../_lib/esign.js';
+import { HttpError, cfg, admin, body, requireOwnerOrStaff, getDoc, saveDoc, leegality, buildInvitees, fail } from '../_lib/esign.js';
+import { staffView } from '../_lib/staff.js';
 
 export default async function handler(req, res) {
   try {
@@ -8,7 +9,7 @@ export default async function handler(req, res) {
     const c = cfg();
     if (!c.token || !c.profileId) throw new HttpError(500, 'Leegality is not set up yet: add LEEGALITY_AUTH_TOKEN and LEEGALITY_PROFILE_ID in Vercel.');
     const sb = admin();
-    await requireOwner(req, sb);
+    const who = await requireOwnerOrStaff(req, sb);
     const { bookingId, pdfBase64 } = body(req);
     if (!bookingId) throw new HttpError(400, 'Missing booking.');
     if (typeof pdfBase64 !== 'string' || !pdfBase64.startsWith('JVBER')) throw new HttpError(400, 'The agreement PDF is missing or invalid.');
@@ -46,6 +47,6 @@ export default async function handler(req, res) {
     };
     const updated = { ...b, status: 'sent', sent_at: now, esign_doc_id: d.documentId, esign, updated_at: now };
     await saveDoc(sb, 'bookings', b.id, updated);
-    res.status(200).json({ ok: true, booking: updated });
+    res.status(200).json({ ok: true, booking: who.role === 'staff' ? staffView(updated) : updated });
   } catch (e) { fail(res, e); }
 }

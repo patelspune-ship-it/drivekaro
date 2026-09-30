@@ -1,12 +1,13 @@
 // POST /api/esign/status  { bookingId }
 // Manual refresh from Leegality (backup for missed webhooks).
-import { HttpError, admin, body, requireOwner, getDoc, saveDoc, leegality, storeSignedFiles, norm10, fail } from '../_lib/esign.js';
+import { HttpError, admin, body, requireOwnerOrStaff, getDoc, saveDoc, leegality, storeSignedFiles, norm10, fail } from '../_lib/esign.js';
+import { staffView } from '../_lib/staff.js';
 
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') throw new HttpError(405, 'Use POST.');
     const sb = admin();
-    await requireOwner(req, sb);
+    const who = await requireOwnerOrStaff(req, sb);
     const { bookingId } = body(req);
     const b = await getDoc(sb, 'bookings', bookingId);
     if (!b) throw new HttpError(404, 'Booking not found.');
@@ -39,6 +40,6 @@ export default async function handler(req, res) {
       if (b.status === 'sent') next.status = 'ready';
     }
     await saveDoc(sb, 'bookings', b.id, next);
-    res.status(200).json({ ok: true, booking: next, leegalityStatus: docStatus || null });
+    res.status(200).json({ ok: true, booking: who.role === 'staff' ? staffView(next) : next, leegalityStatus: docStatus || null });
   } catch (e) { fail(res, e); }
 }

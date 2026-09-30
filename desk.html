@@ -469,6 +469,31 @@ button.mrow:hover{background:var(--surface-2)}
 .opcard summary{cursor:pointer;list-style:none}
 .opcard summary::-webkit-details-marker{display:none}
 .opcard[open] summary{margin-bottom:10px}
+
+/* staff mode */
+.shead{font-size:16px;margin:16px 0 8px}
+.slist{display:flex;flex-direction:column;gap:8px}
+.scard{display:grid;grid-template-columns:62px minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px;cursor:pointer;width:100%;font:inherit;color:inherit}
+.scard.late{border-color:var(--bad)}
+.stime{font:700 16px/1.1 var(--f-display);display:flex;flex-direction:column}
+.stime small{font:400 11.5px var(--f-body);color:var(--muted)}
+.sbody{display:flex;flex-direction:column;gap:3px;min-width:0}
+.sbody small{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.sbody .plate{font-size:10.5px;padding:1px 4px}
+.sside{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.sside small{font-size:12px;font-weight:600}
+.stask-head{margin-bottom:12px}
+.sstep{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:10px}
+.sstep>summary{display:flex;align-items:center;gap:10px;padding:14px;cursor:pointer;list-style:none;font-size:16px}
+.sstep>summary::-webkit-details-marker{display:none}
+.snum{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--surface-2);font-weight:700;font-size:13px;flex:none}
+.sstep.done .snum{background:var(--ok);color:var(--surface)}
+.sbody2{padding:0 14px 14px}
+.sphotos{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.sphotos a,.sphotos span{font-size:12.5px;background:var(--surface-2);border-radius:999px;padding:3px 10px;color:inherit;text-decoration:none}
+.slog{margin:8px 0 0;padding-left:18px;font-size:13px}
+.row.staffrow{grid-template-columns:minmax(0,1fr) auto;cursor:default}
+.row.staffrow .rowact{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap}
   .sigimg{display:block;max-height:48px;max-width:180px;margin:6px 0}
   .sigprev{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;padding:10px;border:1px dashed #d8c9a8;border-radius:10px;background:#fff}
   .sigprev .sigimg{max-height:70px;max-width:240px}
@@ -477,12 +502,12 @@ button.mrow:hover{background:var(--surface-2)}
 <body>
 <div id="gate" class="gate" hidden>
   <form id="gateform" class="gate-card" novalidate>
-    <div><h1>Drive<b>Karo</b></h1><div class="label" style="margin-top:4px">Booking desk · owners only</div></div>
-    <div class="field"><label for="g_email">Email</label><input id="g_email" type="email" autocomplete="username" required></div>
+    <div><h1>Drive<b>Karo</b></h1><div class="label" style="margin-top:4px">Booking desk · owners and staff</div></div>
+    <div class="field"><label for="g_email">Email, or mobile number for staff</label><input id="g_email" type="text" autocomplete="username" autocapitalize="off" required></div>
     <div class="field"><label for="g_pass">Password</label><input id="g_pass" type="password" autocomplete="current-password" required></div>
     <div id="g_err" class="gate-err" role="alert"></div>
     <button class="btn primary" type="submit" id="g_btn">Sign in</button>
-    <p class="muted" style="margin:0;font-size:13px">Use the same login as the old admin. Only emails in your owners list can open the desk.</p>
+    <p class="muted" style="margin:0;font-size:13px">Owners: same login as the old admin. Staff: your mobile number and the password the owner gave you.</p>
   </form>
 </div>
 <div class="wrap" id="app" hidden>

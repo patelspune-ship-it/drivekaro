@@ -31,6 +31,29 @@ export function body(req) {
   return {};
 }
 
+// Signed-in user from the Authorization header.
+export async function getUser(req, sb) {
+  const h = req.headers.authorization || req.headers.Authorization || '';
+  const jwt = h.startsWith('Bearer ') ? h.slice(7) : '';
+  if (!jwt) throw new HttpError(401, 'Your sign-in expired. Sign in again.');
+  const { data, error } = await sb.auth.getUser(jwt);
+  if (error || !data?.user?.email) throw new HttpError(401, 'Your sign-in expired. Sign in again.');
+  return data.user;
+}
+export async function isOwnerEmail(sb, email) {
+  const { data: rows, error } = await sb.from('owners').select('email');
+  if (error) throw new HttpError(500, 'Could not check the owners list.');
+  return (rows || []).some(r => String(r.email).toLowerCase() === String(email).toLowerCase());
+}
+// Owners, or active staff members (desk_docs collection "staff", id = auth user id).
+export async function requireOwnerOrStaff(req, sb) {
+  const user = await getUser(req, sb);
+  if (await isOwnerEmail(sb, user.email)) return { user, role: 'owner', name: 'Owner' };
+  const st = await getDoc(sb, 'staff', user.id);
+  if (!st || st.active === false) throw new HttpError(403, 'This account is not allowed to use the desk.');
+  return { user, role: 'staff', name: st.name || 'Staff', staff: st };
+}
+
 // Only signed-in emails from public.owners may call the desk routes.
 export async function requireOwner(req, sb) {
   const h = req.headers.authorization || req.headers.Authorization || '';
