@@ -2213,36 +2213,38 @@ function staffTaskView(){
       ${L.extras.length?`<div class="sphotos" style="margin-bottom:10px">${L.extras.map(x=>`<span>${esc(x.label)} ${inr(x.amount)}</span>`).join("")}</div>`:""}
       ${staffPayHTML(b,"return")}
       <p class="note" style="margin:10px 0 0">Damage, fuel or cleaning charges and the deposit refund are decided by the owner.</p>`;
-    const canReturn=!!b.odo_return;
+    const canReturn=true;
     const s3=`${canReturn&&L.balance>0?`<p class="note" style="margin:0 0 10px">${inr(L.balance)} is still due. Collect it, or the owner will adjust it from the deposit.</p>`:""}<p style="margin:0 0 10px;font-size:14px">${canReturn?"Check the car, keys and documents are back, then mark it returned.":"Save the return odometer first."}</p><button class="btn primary" data-act="staff-returned" ${canReturn?"":"disabled"}>Mark car returned</button>`;
-    return head+stepHTML(1,"Return check",!!b.odo_return,s1,!b.odo_return)+stepHTML(2,"Charges and payment",!!b.odo_return && L.balance<=0,s2,!!b.odo_return)+stepHTML(3,"Car returned",false,s3,!!b.odo_return && L.balance<=0);
+    return head+stepHTML(1,"Return check",!!(b.odo_return||b.fuel_return||(b.photos||[]).some(p=>p.stage==="return")),s1,!b.odo_return)+stepHTML(2,"Charges and payment",!!b.odo_return && L.balance<=0,s2,!!b.odo_return)+stepHTML(3,"Car returned",false,s3,!!b.odo_return && L.balance<=0);
   }
   // pickup
-  const miss=kycMissingB(b);
+  const miss=[!String(b.name||"").trim()&&"Name"].filter(Boolean); const soft=kycMissingB(b).filter(x=>x!=="Full name");
   const s1=`<div class="grid stask">
       ${fieldHTML("sk_name","Full name (as on DL)",g("name"),{req:1})}
-      ${fieldHTML("sk_father","Father's / spouse's name",g("father"),{req:1})}
-      ${fieldHTML("sk_dob","Date of birth",g("dob"),{type:"date",req:1})}
-      ${fieldHTML("sk_address","Address",g("address"),{type:"textarea",wide:1,req:1})}
-      ${fieldHTML("sk_emergency","Emergency contact (name and mobile)",g("emergency"),{req:1})}
+      <div class="field"><label>Mobile <em>*</em></label><input value="${esc(b.phone||"")}" disabled></div>
+      ${fieldHTML("sk_father","Father's / spouse's name",g("father"))}
+      ${fieldHTML("sk_dob","Date of birth",g("dob"),{type:"date"})}
+      ${fieldHTML("sk_address","Address",g("address"),{type:"textarea",wide:1})}
+      ${fieldHTML("sk_emergency","Emergency contact (name and mobile)",g("emergency"))}
       ${fieldHTML("sk_alt","Alternate mobile",g("alt_phone"),{type:"tel"})}
       ${fieldHTML("sk_email","Email",g("email"),{type:"email"})}
-      ${fieldHTML("sk_dl","Driving licence number",g("dl"),{req:1,attrs:'style="text-transform:uppercase"'})}
-      ${fieldHTML("sk_dltill","Licence valid till",g("dl_till"),{type:"date",req:1})}
+      ${fieldHTML("sk_dl","Driving licence number",g("dl"),{attrs:'style="text-transform:uppercase"'})}
+      ${fieldHTML("sk_dltill","Licence valid till",g("dl_till"),{type:"date"})}
       ${fieldHTML("sk_rto","Issuing RTO",g("rto"))}
       ${selectHTML("sk_idtype","ID type",g("id_type")||IDTYPES[0],IDTYPES.map(x=>[x,x]))}
-      ${fieldHTML("sk_a4","ID last 4 digits only",g("aadhaar4"),{req:1,attrs:'maxlength="4" inputmode="numeric"',hint:"Never write the full Aadhaar number."})}
+      ${fieldHTML("sk_a4","ID last 4 digits only",g("aadhaar4"),{attrs:'maxlength="4" inputmode="numeric"',hint:"Never write the full Aadhaar number."})}
     </div>
     <details class="more"><summary>Additional driver (optional)</summary><div class="grid" style="margin-top:10px">
       ${fieldHTML("sk_aname","Full name",g("addl_name"))}${fieldHTML("sk_adob","Date of birth",g("addl_dob"),{type:"date"})}${fieldHTML("sk_aphone","Mobile",g("addl_phone"),{type:"tel"})}${fieldHTML("sk_adl","DL number",g("addl_dl"),{attrs:'style="text-transform:uppercase"'})}${fieldHTML("sk_adltill","DL valid till",g("addl_dl_till"),{type:"date"})}
     </div></details>
+    ${soft.length?`<p class="muted" style="margin:10px 0 0;font-size:12.5px">Optional, but good to fill: ${esc(soft.join(", "))}.</p>`:""}
     <div class="actions" style="margin-top:10px"><button class="btn primary" data-act="staff-save-kyc">Save customer details</button></div>
     <div class="field wide" style="margin-top:14px"><label>Document photos</label>
       ${S.photosReady?`<div class="grid"><div class="field"><select id="sk_doctype">${DOC_TYPES.map(t=>`<option>${esc(t)}</option>`).join("")}</select></div><div class="field"><input type="file" accept="image/*,application/pdf" capture="environment" data-upload="kyc"></div></div><span class="hint">Aadhaar: masked copy only.</span>`:`<span class="hint err">Photo upload is not set up yet. Ask the owner to connect Google Drive in Settings.</span>`}
       ${(S.kycUp?.[b.id]||[]).length?`<div class="sphotos">${S.kycUp[b.id].map(d=>`<a href="${esc(d.link||"#")}" target="_blank" rel="noopener">${esc(d.type)} ✓</a>`).join("")}</div>`:""}
     </div>`;
   const s2=`<div class="grid stask">
-      ${fieldHTML("sh_odo","Odometer at pickup (km)",g("odo"),{type:"number",req:1,attrs:'min="0" inputmode="numeric"'})}
+      ${fieldHTML("sh_odo","Odometer at pickup (km)",g("odo"),{type:"number",attrs:'min="0" inputmode="numeric"'})}
       ${selectHTML("sh_fuel","Fuel level",g("fuel"),[["",""],...FUEL.map(f=>[f,f])])}
       ${selectHTML("sh_keys","Keys handed over",g("keys"),[["",""],["1","1"],["2","2"]])}
       ${fieldHTML("sh_ext","Existing outside damage",g("ext_damage"),{type:"textarea",wide:1,attrs:'placeholder="e.g. scratch on rear bumper, left"'})}
@@ -2259,8 +2261,9 @@ function staffTaskView(){
   else if(b.status==="sent") s3=b.esign?.document_id?esignPanelHTML(b):`<p class="muted">Sent for signing.</p>`;
   else s3=`<p class="okline" style="margin:0">Agreement signed by the customer.</p>`;
   const due=dueNow(b,S.settings);
-  const blockers=[b.status!=="signed"&&"Agreement not signed yet", due>0&&`${inr(due)} still to collect`, !b.odo&&"Pickup odometer not saved", depType(b)==="bike"&&!b.dep_bike_no&&"Bike number for the deposit", depType(b)==="document"&&!b.dep_doc_type&&"Which document was taken"].filter(Boolean);
-  const s5=`${blockers.length?`<div class="errors" style="margin:0 0 10px"><ul>${blockers.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`:`<p style="margin:0 0 10px;font-size:14px">Everything is done. Show the customer the car, then hand over the keys.</p>`}<button class="btn primary" data-act="staff-handed" ${blockers.length?"disabled":""}>Mark car handed over</button>`;
+  const blockers=[b.status!=="signed"&&"Agreement not signed yet"].filter(Boolean);
+  const warns=[due>0&&`${inr(due)} still to collect`, !b.odo&&"Pickup odometer not entered"].filter(Boolean);
+  const s5=`${blockers.length?`<div class="errors" style="margin:0 0 10px"><ul>${blockers.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`:warns.length?`<p class="note" style="margin:0 0 10px">${esc(warns.join(" · "))}. You can still hand over.</p>`:`<p style="margin:0 0 10px;font-size:14px">Everything is done. Show the customer the car, then hand over the keys.</p>`}<button class="btn primary" data-act="staff-handed" data-warn="${esc(warns.join(", "))}" ${blockers.length?"disabled":""}>Mark car handed over</button>`;
   return head
     +stepHTML(1,"Customer details",!miss.length,s1,!!miss.length)
     +stepHTML(2,"Car check and deposit",!!b.odo,s2,!miss.length && !b.odo)
@@ -2297,7 +2300,6 @@ async function staffClick(act, t, b){
       await staffSave(b,{patch:v},"Customer details saved."); return true; }
     case "staff-save-handover": {
       const v=readVals({odo:"sh_odo",fuel:"sh_fuel",keys:"sh_keys",ext_damage:"sh_ext",int_damage:"sh_int",deposit_type:"f_deptype",deposit:"f_deposit",dep_bike_no:"f_depbike",dep_bike_model:"f_depbikemodel",dep_doc_type:"f_depdoc",dep_doc_details:"f_depdocdet"});
-      if(!(Number(v.odo)>0)){ toast("Enter the odometer reading."); return true; }
       if(v.deposit_type!=="cash") v.deposit="";
       await staffSave(b,{patch:v},"Car check saved."); return true; }
     case "staff-ready": await staffSave(b,{status:"ready"},"Agreement ready. Send it for eSign."); return true;
@@ -2307,11 +2309,10 @@ async function staffClick(act, t, b){
       if(mode==="UPI" && !ref && !confirm("No UPI reference entered. Record anyway?")) return true;
       if(S.staffPayAmt) delete S.staffPayAmt[b.id];
       await staffSave(b,{payment:{kind:$("#sp_kind").value, amount:amt, mode, ref, at:toLocalInput()}},`${inr(amt)} recorded.`); return true; }
-    case "staff-handed": if(confirm("Hand over the car now?")) await staffSave(b,{status:"handed"},"Car handed over. Have a safe trip!"); return true;
+    case "staff-handed": if(confirm(t.dataset.warn?`${t.dataset.warn}. Hand over the car anyway?`:"Hand over the car now?")) await staffSave(b,{status:"handed"},"Car handed over. Have a safe trip!"); return true;
     case "staff-save-return": {
       const v=readVals({odo_return:"sr_odo",fuel_return:"sr_fuel",return_at:"sr_at",return_damage:"sr_dmg"});
-      if(!(Number(v.odo_return)>0)){ toast("Enter the odometer reading."); return true; }
-      if(b.odo && Number(v.odo_return)<Number(b.odo)){ toast("Return reading is lower than the pickup reading. Check it."); return true; }
+      if(b.odo && v.odo_return && Number(v.odo_return)<Number(b.odo)){ toast("Return reading is lower than the pickup reading. Check it."); return true; }
       await staffSave(b,{patch:v},"Return check saved."); return true; }
     case "staff-extra": await staffSave(b,{extra:{label:t.dataset.label, amount:Number(t.dataset.amount), note:t.dataset.note}},`${t.dataset.label} added.`); return true;
     case "staff-returned": if(confirm("Mark the car returned?")) await staffSave(b,{status:"returned"},"Car returned. Thank you!"); return true;
